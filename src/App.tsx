@@ -1,5 +1,21 @@
 import { useMemo, useRef, useState } from "react";
 import type { DragEvent } from "react";
+import {
+  ArrowDownToLine,
+  ArrowRight,
+  ArrowUpToLine,
+  Copy as CopyIcon,
+  Eye,
+  FolderInput,
+  Image as ImageIcon,
+  ListFilter,
+  Menu,
+  Monitor,
+  MoreVertical,
+  Plus,
+  Trash2,
+  Type,
+} from "lucide-react";
 import "./App.css";
 
 type Channel = {
@@ -1098,7 +1114,7 @@ export default function App() {
                     title=""
                     onClick={addGroupFromButton}
                   >
-                    +
+                    <Plus size={22} strokeWidth={2.5} />
                   </button>
 
                   <button
@@ -1110,7 +1126,7 @@ export default function App() {
                       setOpenMenu(openMenu === "group" ? null : "group");
                     }}
                   >
-                    ⋮
+                    <MoreVertical size={22} strokeWidth={2.5} />
                   </button>
 
                   {openMenu === "group" && (
@@ -1119,7 +1135,9 @@ export default function App() {
                       onClick={(event) => event.stopPropagation()}
                     >
                       <button onClick={addGroupFromButton}>
-                        <span className="menuIcon">＋</span>
+                        <span className="menuIcon">
+                          <Plus size={22} strokeWidth={2.5} />
+                        </span>
                         <span>Add group</span>
                       </button>
 
@@ -1130,7 +1148,9 @@ export default function App() {
                         }
                         onClick={openRenameModal}
                       >
-                        <span className="menuIcon">Tᵀ</span>
+                        <span className="menuIcon">
+                          <Type size={22} strokeWidth={2.5} />
+                        </span>
                         <span>Rename group</span>
                       </button>
 
@@ -1138,7 +1158,9 @@ export default function App() {
                         disabled={groupActionTargets.length === 0}
                         onClick={() => deleteGroups(groupActionTargets)}
                       >
-                        <span className="menuIcon">⌫</span>
+                        <span className="menuIcon">
+                          <Trash2 size={22} strokeWidth={2.5} />
+                        </span>
                         <span>Delete group(s)</span>
                       </button>
 
@@ -1148,7 +1170,9 @@ export default function App() {
                         disabled={groupActionTargets.length === 0}
                         onClick={() => moveGroupsToTop(groupActionTargets)}
                       >
-                        <span className="menuIcon">↑</span>
+                        <span className="menuIcon">
+                          <ArrowUpToLine size={22} strokeWidth={2.5} />
+                        </span>
                         <span>Move group(s) to top</span>
                       </button>
 
@@ -1156,7 +1180,9 @@ export default function App() {
                         disabled={groupActionTargets.length === 0}
                         onClick={() => moveGroupsToBottom(groupActionTargets)}
                       >
-                        <span className="menuIcon">↓</span>
+                        <span className="menuIcon">
+                          <ArrowDownToLine size={22} strokeWidth={2.5} />
+                        </span>
                         <span>Move group(s) to bottom</span>
                       </button>
                     </div>
@@ -1292,7 +1318,7 @@ export default function App() {
                     data-tooltip="EPG"
                     disabled
                   >
-                    ▭
+                    <Monitor size={21} strokeWidth={2.3} />
                   </button>
 
                   <button
@@ -1300,7 +1326,7 @@ export default function App() {
                     data-tooltip="Logo"
                     disabled
                   >
-                    ▧
+                    <ImageIcon size={21} strokeWidth={2.3} />
                   </button>
 
                   <button
@@ -1308,7 +1334,7 @@ export default function App() {
                     data-tooltip="Add channel"
                     disabled
                   >
-                    +
+                    <Plus size={22} strokeWidth={2.5} />
                   </button>
 
                   <button
@@ -1316,7 +1342,7 @@ export default function App() {
                     data-tooltip="Bulk operations"
                     disabled
                   >
-                    ≡
+                    <ListFilter size={22} strokeWidth={2.5} />
                   </button>
 
                   <button
@@ -1352,7 +1378,7 @@ export default function App() {
                       setOpenMenu(openMenu === "channel" ? null : "channel");
                     }}
                   >
-                    ⋮
+                    <MoreVertical size={22} strokeWidth={2.5} />
                   </button>
 
                   {openMenu === "channel" && (
@@ -1361,7 +1387,9 @@ export default function App() {
                       onClick={(event) => event.stopPropagation()}
                     >
                       <button disabled={selectedChannelIds.length === 0}>
-                        <span className="menuIcon">☰</span>
+                        <span className="menuIcon">
+                          <Menu size={23} strokeWidth={2.5} />
+                        </span>
                         <span>Bulk Edit Fields...</span>
                       </button>
 
@@ -1369,12 +1397,16 @@ export default function App() {
                         disabled={selectedChannelIds.length !== 1}
                         onClick={openChannelEditor}
                       >
-                        <span className="menuIcon">Tᵀ</span>
+                        <span className="menuIcon">
+                          <Type size={23} strokeWidth={2.5} />
+                        </span>
                         <span>Rename / Edit...</span>
                       </button>
 
                       <button disabled={selectedChannelIds.length === 0}>
-                        <span className="menuIcon">◉</span>
+                        <span className="menuIcon">
+                          <Eye size={23} strokeWidth={2.5} />
+                        </span>
                         <span>Show / Hide...</span>
                       </button>
 
@@ -1385,7 +1417,9 @@ export default function App() {
                           setOpenMenu(null);
                         }}
                       >
-                        <span className="menuIcon">➜</span>
+                        <span className="menuIcon">
+                          <FolderInput size={23} strokeWidth={2.5} />
+                        </span>
                         <span>Move to group...</span>
                       </button>
 
@@ -1396,7 +1430,9 @@ export default function App() {
                           setOpenMenu(null);
                         }}
                       >
-                        <span className="menuIcon">▣</span>
+                        <span className="menuIcon">
+                          <CopyIcon size={23} strokeWidth={2.5} />
+                        </span>
                         <span>Copy to group...</span>
                       </button>
 
@@ -1406,7 +1442,9 @@ export default function App() {
                         disabled={selectedChannelIds.length === 0}
                         onClick={moveSelectedToTop}
                       >
-                        <span className="menuIcon">↑</span>
+                        <span className="menuIcon">
+                          <ArrowUpToLine size={23} strokeWidth={2.5} />
+                        </span>
                         <span>Move to top</span>
                       </button>
 
@@ -1414,7 +1452,9 @@ export default function App() {
                         disabled={selectedChannelIds.length === 0}
                         onClick={moveSelectedToBottom}
                       >
-                        <span className="menuIcon">↓</span>
+                        <span className="menuIcon">
+                          <ArrowDownToLine size={23} strokeWidth={2.5} />
+                        </span>
                         <span>Move to bottom</span>
                       </button>
 
@@ -1424,7 +1464,9 @@ export default function App() {
                         disabled={selectedChannelIds.length === 0}
                         onClick={deleteSelectedChannels}
                       >
-                        <span className="menuIcon">⌫</span>
+                        <span className="menuIcon">
+                          <Trash2 size={23} strokeWidth={2.5} />
+                        </span>
                         <span>Delete selected</span>
                       </button>
                     </div>
@@ -1613,7 +1655,13 @@ export default function App() {
                 onClick={(event) => event.stopPropagation()}
               >
                 <div className="modalTitle">
-                  <span>{groupPickerMode === "copy" ? "▣" : "➜"}</span>
+                  <span>
+                    {groupPickerMode === "copy" ? (
+                      <CopyIcon size={26} />
+                    ) : (
+                      <FolderInput size={26} />
+                    )}
+                  </span>
                   <h2>
                     {groupPickerMode === "copy"
                       ? "Copy to Group"
@@ -1694,7 +1742,9 @@ export default function App() {
                 onClick={(event) => event.stopPropagation()}
               >
                 <div className="modalTitle">
-                  <span>Tᵀ</span>
+                  <span>
+                    <Type size={26} />
+                  </span>
                   <h2>Rename / Edit Channel</h2>
                 </div>
 
