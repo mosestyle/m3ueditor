@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
+import type { DragEvent } from "react";
 import "./App.css";
 
 type Channel = {
@@ -7,7 +8,20 @@ type Channel = {
   group: string;
   url: string;
   rawInfo: string;
+  tvgId: string;
+  tvgName: string;
+  tvgLogo: string;
 };
+
+type DropTarget = {
+  channelId: string;
+  position: "above" | "below";
+};
+
+function getAttribute(line: string, attribute: string): string {
+  const match = line.match(new RegExp(`${attribute}="([^"]*)"`, "i"));
+  return match?.[1]?.trim() || "";
+}
 
 function parseM3U(text: string): Channel[] {
   const lines = text.split(/\r?\n/);
@@ -23,16 +37,19 @@ function parseM3U(text: string): Channel[] {
       const channelName =
         lastCommaIndex >= 0
           ? line.substring(lastCommaIndex + 1).trim()
-          : "Unnamed channel";
+          : getAttribute(line, "tvg-name") || "Unnamed channel";
 
-      const groupMatch = line.match(/group-title="([^"]*)"/i);
+      const group = getAttribute(line, "group-title") || "No Group";
 
       channels.push({
         id: crypto.randomUUID(),
         name: channelName,
-        group: groupMatch?.[1]?.trim() || "No Group",
+        group,
         url,
         rawInfo: line,
+        tvgId: getAttribute(line, "tvg-id"),
+        tvgName: getAttribute(line, "tvg-name"),
+        tvgLogo: getAttribute(line, "tvg-logo"),
       });
     }
   }
@@ -40,22 +57,29 @@ function parseM3U(text: string): Channel[] {
   return channels;
 }
 
-function updateGroupInRawInfo(rawInfo: string, newGroup: string): string {
-  if (rawInfo.match(/group-title="[^"]*"/i)) {
-    return rawInfo.replace(/group-title="[^"]*"/i, `group-title="${newGroup}"`);
+function setAttribute(line: string, attribute: string, value: string): string {
+  const escapedValue = value.replace(/"/g, "&quot;");
+  const attributePattern = new RegExp(`${attribute}="[^"]*"`, "i");
+
+  if (attributePattern.test(line)) {
+    return line.replace(attributePattern, `${attribute}="${escapedValue}"`);
   }
 
-  const commaIndex = rawInfo.lastIndexOf(",");
+  const commaIndex = line.lastIndexOf(",");
 
   if (commaIndex >= 0) {
     return (
-      rawInfo.slice(0, commaIndex) +
-      ` group-title="${newGroup}"` +
-      rawInfo.slice(commaIndex)
+      line.slice(0, commaIndex) +
+      ` ${attribute}="${escapedValue}"` +
+      line.slice(commaIndex)
     );
   }
 
-  return `${rawInfo} group-title="${newGroup}"`;
+  return `${line} ${attribute}="${escapedValue}"`;
+}
+
+function updateGroupInRawInfo(rawInfo: string, newGroup: string): string {
+  return setAttribute(rawInfo, "group-title", newGroup);
 }
 
 function exportM3U(channels: Channel[], originalFileName: string) {
@@ -81,6 +105,53 @@ function exportM3U(channels: Channel[], originalFileName: string) {
   URL.revokeObjectURL(url);
 }
 
+function moveItemsNearTarget(
+  channels: Channel[],
+  draggedIds: string[],
+  targetId: string,
+  position: "above" | "below"
+): Channel[] {
+  if (draggedIds.includes(targetId)) {
+    return channels;
+  }
+
+  const draggedSet = new Set(draggedIds);
+  const draggedItems = channels.filter((channel) => draggedSet.has(channel.id));
+  const remainingItems = channels.filter((channel) => !draggedSet.has(channel.id));
+
+  const targetIndex = remainingItems.findIndex(
+    (channel) => channel.id === targetId
+  );
+
+  if (targetIndex < 0) {
+    return channels;
+  }
+
+  const insertIndex = position === "below" ? targetIndex + 1 : targetIndex;
+
+  return [
+    ...remainingItems.slice(0, insertIndex),
+    ...draggedItems,
+    ...remainingItems.slice(insertIndex),
+  ];
+}
+
+function createDragPreview(text: string) {
+  const preview = document.createElement("div");
+  preview.className = "dragPreview";
+  preview.textContent = text;
+  document.body.appendChild(preview);
+  return preview;
+}
+
+function getRowDropPosition(
+  event: DragEvent<HTMLDivElement>
+): "above" | "below" {
+  const rect = event.currentTarget.getBoundingClientRect();
+  const middle = rect.top + rect.height / 2;
+  return event.clientY < middle ? "above" : "below";
+}
+
 export default function App() {
   const [channels, setChannels] = useState<Channel[]>([]);
   const [fileName, setFileName] = useState("");
@@ -91,10 +162,36 @@ export default function App() {
   const [draggedChannelIds, setDraggedChannelIds] = useState<string[]>([]);
   const [dragOverGroup, setDragOverGroup] = useState("");
 
+  const channelListRef = useRef<HTMLDivElement | null>(null);
+  const dropIndicatorRef = useRef<HTMLDivElement | null>(null);
+  const currentDropTargetRef = useRef<DropTarget | null>(null);
+
+  const selectedChannelSet = useMemo(() => {
+    return new Set(selectedChannelIds);
+  }, [selectedChannelIds]);
+
   const groups = useMemo(() => {
-    return Array.from(new Set(channels.map((channel) => channel.group))).sort(
-      (a, b) => a.localeCompare(b)
-    );
+    const seen = new Set<string>();
+    const orderedGroups: string[] = [];
+
+    for (const channel of channels) {
+      if (!seen.has(channel.group)) {
+        seen.add(channel.group);
+        orderedGroups.push(channel.group);
+      }
+    }
+
+    return orderedGroups;
+  }, [channels]);
+
+  const groupCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+
+    for (const channel of channels) {
+      counts.set(channel.group, (counts.get(channel.group) || 0) + 1);
+    }
+
+    return counts;
   }, [channels]);
 
   const filteredChannels = useMemo(() => {
@@ -104,19 +201,67 @@ export default function App() {
       const matchesGroup =
         selectedGroup === "All Channels" || channel.group === selectedGroup;
 
-      const matchesSearch =
-        !search ||
+      if (!matchesGroup) {
+        return false;
+      }
+
+      if (!search) {
+        return true;
+      }
+
+      return (
         channel.name.toLowerCase().includes(search) ||
         channel.group.toLowerCase().includes(search) ||
-        channel.url.toLowerCase().includes(search);
-
-      return matchesGroup && matchesSearch;
+        channel.url.toLowerCase().includes(search) ||
+        channel.tvgId.toLowerCase().includes(search) ||
+        channel.tvgName.toLowerCase().includes(search)
+      );
     });
   }, [channels, selectedGroup, searchText]);
 
+  const visibleChannels = filteredChannels.slice(0, 1000);
+
   const allVisibleSelected =
-    filteredChannels.length > 0 &&
-    filteredChannels.every((channel) => selectedChannelIds.includes(channel.id));
+    visibleChannels.length > 0 &&
+    visibleChannels.every((channel) => selectedChannelSet.has(channel.id));
+
+  function showDropIndicator(
+    event: DragEvent<HTMLDivElement>,
+    channelId: string
+  ) {
+    const list = channelListRef.current;
+    const indicator = dropIndicatorRef.current;
+
+    if (!list || !indicator) {
+      return;
+    }
+
+    const position = getRowDropPosition(event);
+    const row = event.currentTarget;
+    const y = row.offsetTop + (position === "below" ? row.offsetHeight : 0);
+
+    currentDropTargetRef.current = {
+      channelId,
+      position,
+    };
+
+    indicator.style.display = "block";
+    indicator.style.transform = `translateY(${y - 2}px)`;
+  }
+
+  function hideDropIndicator() {
+    currentDropTargetRef.current = null;
+
+    if (dropIndicatorRef.current) {
+      dropIndicatorRef.current.style.display = "none";
+    }
+  }
+
+  function resetDragState() {
+    setDraggedChannelIds([]);
+    setDragOverGroup("");
+    hideDropIndicator();
+  }
 
   function handleFile(file: File) {
     const reader = new FileReader();
@@ -131,8 +276,7 @@ export default function App() {
       setSelectedChannelIds([]);
       setSearchText("");
       setNewGroupName("");
-      setDraggedChannelIds([]);
-      setDragOverGroup("");
+      resetDragState();
     };
 
     reader.readAsText(file);
@@ -149,7 +293,7 @@ export default function App() {
   }
 
   function toggleAllVisible() {
-    const visibleIds = filteredChannels.map((channel) => channel.id);
+    const visibleIds = visibleChannels.map((channel) => channel.id);
 
     if (allVisibleSelected) {
       setSelectedChannelIds((current) =>
@@ -190,25 +334,62 @@ export default function App() {
     setSelectedGroup(cleanGroupName);
     setSelectedChannelIds([]);
     setNewGroupName("");
-    setDraggedChannelIds([]);
-    setDragOverGroup("");
+    resetDragState();
   }
 
-  function moveSelectedToGroup(groupName: string) {
-    moveChannelsToGroup(selectedChannelIds, groupName);
-  }
+  function copyChannelsToGroup(channelIds: string[], groupName: string) {
+    const cleanGroupName = groupName.trim();
 
-  function createNewGroupAndMove() {
-    moveSelectedToGroup(newGroupName);
-  }
-
-  function startDraggingChannel(channelId: string) {
-    if (selectedChannelIds.includes(channelId)) {
-      setDraggedChannelIds(selectedChannelIds);
+    if (!cleanGroupName || channelIds.length === 0) {
       return;
     }
 
+    setChannels((current) => {
+      const selectedChannels = current.filter((channel) =>
+        channelIds.includes(channel.id)
+      );
+
+      const copiedChannels = selectedChannels
+        .filter((channel) => {
+          return !current.some(
+            (existing) =>
+              existing.group === cleanGroupName &&
+              existing.url === channel.url &&
+              existing.name === channel.name
+          );
+        })
+        .map((channel) => ({
+          ...channel,
+          id: crypto.randomUUID(),
+          group: cleanGroupName,
+          rawInfo: updateGroupInRawInfo(channel.rawInfo, cleanGroupName),
+        }));
+
+      return [...current, ...copiedChannels];
+    });
+
+    setSelectedGroup(cleanGroupName);
+    setSelectedChannelIds([]);
+    setNewGroupName("");
+    resetDragState();
+  }
+
+  function createNewGroupAndCopy() {
+    copyChannelsToGroup(selectedChannelIds, newGroupName);
+  }
+
+  function createNewGroupAndMove() {
+    moveChannelsToGroup(selectedChannelIds, newGroupName);
+  }
+
+  function startDraggingChannel(channelId: string) {
+    if (selectedChannelSet.has(channelId)) {
+      setDraggedChannelIds(selectedChannelIds);
+      return selectedChannelIds;
+    }
+
     setDraggedChannelIds([channelId]);
+    return [channelId];
   }
 
   function dropChannelsOnGroup(groupName: string) {
@@ -216,7 +397,27 @@ export default function App() {
       return;
     }
 
-    moveChannelsToGroup(draggedChannelIds, groupName);
+    copyChannelsToGroup(draggedChannelIds, groupName);
+  }
+
+  function dropChannelsOnChannel() {
+    const target = currentDropTargetRef.current;
+
+    if (!target || draggedChannelIds.length === 0) {
+      resetDragState();
+      return;
+    }
+
+    setChannels((current) =>
+      moveItemsNearTarget(
+        current,
+        draggedChannelIds,
+        target.channelId,
+        target.position
+      )
+    );
+
+    resetDragState();
   }
 
   function getDragText() {
@@ -225,153 +426,226 @@ export default function App() {
     }
 
     if (draggedChannelIds.length === 1) {
-      return "Drop to move 1 channel";
+      return "Copy 1 channel";
     }
 
-    return `Drop to move ${draggedChannelIds.length.toLocaleString()} channels`;
+    return `Copy ${draggedChannelIds.length.toLocaleString()} channels`;
   }
 
   return (
     <main className="app">
-      <header className="header">
-        <div>
-          <h1>Moses M3U Editor</h1>
-          <p>Edit your M3U playlist locally in your browser.</p>
+      <header className="topBar">
+        <div className="brand">
+          <div className="logoMark">M</div>
+          <div>
+            <h1>Moses M3U Editor</h1>
+            <p>Local browser playlist editor</p>
+          </div>
+        </div>
+
+        <div className="topActions">
+          <label className="importButton">
+            Import M3U
+            <input
+              type="file"
+              accept=".m3u,.m3u8,text/plain"
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                if (file) handleFile(file);
+              }}
+            />
+          </label>
+
+          <button
+            className="primaryButton"
+            disabled={channels.length === 0}
+            onClick={() => exportM3U(channels, fileName)}
+          >
+            Export M3U
+          </button>
         </div>
       </header>
 
-      <section className="uploadBox">
-        <div>
-          <h2>Upload your M3U file</h2>
-          <p>Your file stays on your computer. Nothing is uploaded online.</p>
-        </div>
+      {channels.length === 0 && (
+        <section className="emptyImport">
+          <h2>Import your M3U file</h2>
+          <p>Your playlist stays on your computer. Nothing is uploaded online.</p>
 
-        <input
-          type="file"
-          accept=".m3u,.m3u8,text/plain"
-          onChange={(event) => {
-            const file = event.target.files?.[0];
-            if (file) handleFile(file);
-          }}
-        />
-      </section>
-
-      {channels.length > 0 && (
-        <section className="playlistInfo">
-          <div>
-            <strong>{fileName}</strong>
-            <span>{channels.length.toLocaleString()} channels loaded</span>
-          </div>
-
-          <button onClick={() => exportM3U(channels, fileName)}>
-            Export edited M3U
-          </button>
+          <label className="bigImportButton">
+            Choose M3U file
+            <input
+              type="file"
+              accept=".m3u,.m3u8,text/plain"
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                if (file) handleFile(file);
+              }}
+            />
+          </label>
         </section>
       )}
 
       {channels.length > 0 && (
-        <section className="editorLayout">
-          <aside className="groupsPanel">
-            <div className="panelTitle">
-              <h2>Groups</h2>
-              <span>{groups.length}</span>
+        <>
+          <section className="playlistStrip">
+            <div>
+              <strong>{fileName}</strong>
+              <span>{channels.length.toLocaleString()} total channels</span>
             </div>
 
-            <button
-              className={
-                selectedGroup === "All Channels"
-                  ? "groupButton active"
-                  : "groupButton"
-              }
-              onClick={() => setSelectedGroup("All Channels")}
-            >
-              <span>All Channels</span>
-              <strong>{channels.length.toLocaleString()}</strong>
-            </button>
+            <div className="stripTools">
+              <input
+                className="globalSearch"
+                value={searchText}
+                onChange={(event) => setSearchText(event.target.value)}
+                placeholder="Search all channels..."
+              />
 
-            <div className="dragHint">
-              Tip: drag selected channels onto a group.
+              <button onClick={toggleAllVisible}>
+                {allVisibleSelected ? "Unselect visible" : "Select visible"}
+              </button>
+
+              <button onClick={clearSelection}>Clear</button>
             </div>
+          </section>
 
-            <div className="groupList">
-              {groups.map((group) => {
-                const count = channels.filter(
-                  (channel) => channel.group === group
-                ).length;
+          <section className="editorLayout">
+            <aside className="groupsPanel">
+              <div className="panelHeader">
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={selectedGroup === "All Channels"}
+                    onChange={() => setSelectedGroup("All Channels")}
+                  />
+                  <strong>Groups</strong>
+                  <span>{groups.length}</span>
+                </label>
 
-                const className = [
-                  "groupButton",
-                  selectedGroup === group ? "active" : "",
-                  dragOverGroup === group ? "dragOver" : "",
-                ]
-                  .filter(Boolean)
-                  .join(" ");
-
-                return (
-                  <button
-                    key={group}
-                    className={className}
-                    onClick={() => setSelectedGroup(group)}
-                    onDragOver={(event) => {
-                      event.preventDefault();
-                      setDragOverGroup(group);
-                    }}
-                    onDragLeave={() => setDragOverGroup("")}
-                    onDrop={(event) => {
-                      event.preventDefault();
-                      dropChannelsOnGroup(group);
-                    }}
-                  >
-                    <span>{group}</span>
-                    <strong>{count.toLocaleString()}</strong>
-
-                    {dragOverGroup === group && draggedChannelIds.length > 0 && (
-                      <em>{getDragText()}</em>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-          </aside>
-
-          <section className="channelsPanel">
-            <div className="toolbar">
-              <div className="toolbarTop">
-                <div>
-                  <h2>{selectedGroup}</h2>
-                  <p>
-                    Showing {filteredChannels.length.toLocaleString()} channels
-                    {selectedChannelIds.length > 0 &&
-                      ` • ${selectedChannelIds.length.toLocaleString()} selected`}
-                  </p>
+                <div className="miniButtons">
+                  <button title="Add group">+</button>
+                  <button title="Group options">⋮</button>
                 </div>
-
-                <button className="secondaryButton" onClick={clearSelection}>
-                  Clear selection
-                </button>
               </div>
 
-              <div className="toolbarControls">
-                <input
-                  className="searchInput"
-                  value={searchText}
-                  onChange={(event) => setSearchText(event.target.value)}
-                  placeholder="Search channels, groups or URLs..."
-                />
+              <button
+                className={
+                  selectedGroup === "All Channels"
+                    ? "groupRow active"
+                    : "groupRow"
+                }
+                onClick={() => setSelectedGroup("All Channels")}
+              >
+                <span className="dragDots">⠿</span>
+                <span>All Channels</span>
+                <em>{channels.length.toLocaleString()}</em>
+              </button>
 
-                <button onClick={toggleAllVisible}>
-                  {allVisibleSelected ? "Unselect visible" : "Select visible"}
-                </button>
+              <div className="groupList">
+                {groups.map((group) => {
+                  const count = groupCounts.get(group) || 0;
+
+                  const className = [
+                    "groupRow",
+                    selectedGroup === group ? "active" : "",
+                    dragOverGroup === group ? "dragOver" : "",
+                  ]
+                    .filter(Boolean)
+                    .join(" ");
+
+                  return (
+                    <button
+                      key={group}
+                      className={className}
+                      onClick={() => setSelectedGroup(group)}
+                      onDragOver={(event) => {
+                        event.preventDefault();
+                        if (dragOverGroup !== group) {
+                          setDragOverGroup(group);
+                        }
+                      }}
+                      onDragLeave={() => setDragOverGroup("")}
+                      onDrop={(event) => {
+                        event.preventDefault();
+                        dropChannelsOnGroup(group);
+                      }}
+                    >
+                      <span className="dragDots">⠿</span>
+                      <span className="groupName">{group}</span>
+                      <em>{count.toLocaleString()}</em>
+
+                      {dragOverGroup === group && draggedChannelIds.length > 0 && (
+                        <small>{getDragText()}</small>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </aside>
+
+            <section className="channelsPanel">
+              <div className="panelHeader channelHeader">
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={allVisibleSelected}
+                    onChange={toggleAllVisible}
+                  />
+                  <strong>{selectedGroup}</strong>
+                  <span>
+                    {filteredChannels.length.toLocaleString()} channels
+                    {selectedChannelIds.length > 0 &&
+                      ` • ${selectedChannelIds.length.toLocaleString()} selected`}
+                  </span>
+                </label>
+
+                <div className="miniButtons">
+                  <button
+                    disabled={selectedChannelIds.length === 0}
+                    onClick={createNewGroupAndCopy}
+                    title="Copy selected to new group"
+                  >
+                    Copy +
+                  </button>
+
+                  <button
+                    disabled={selectedChannelIds.length === 0}
+                    onClick={createNewGroupAndMove}
+                    title="Move selected to new group"
+                  >
+                    Move +
+                  </button>
+
+                  <button title="More actions">⋮</button>
+                </div>
+              </div>
+
+              <div className="actionBar">
+                <select
+                  value=""
+                  disabled={selectedChannelIds.length === 0}
+                  onChange={(event) => {
+                    const value = event.target.value;
+                    if (value) copyChannelsToGroup(selectedChannelIds, value);
+                  }}
+                >
+                  <option value="">Copy selected to group...</option>
+                  {groups.map((group) => (
+                    <option key={group} value={group}>
+                      {group}
+                    </option>
+                  ))}
+                </select>
 
                 <select
                   value=""
                   disabled={selectedChannelIds.length === 0}
                   onChange={(event) => {
                     const value = event.target.value;
-                    if (value) moveSelectedToGroup(value);
+                    if (value) moveChannelsToGroup(selectedChannelIds, value);
                   }}
                 >
-                  <option value="">Move selected to...</option>
+                  <option value="">Move selected to group...</option>
                   {groups.map((group) => (
                     <option key={group} value={group}>
                       {group}
@@ -380,70 +654,125 @@ export default function App() {
                 </select>
 
                 <input
-                  className="newGroupInput"
                   value={newGroupName}
                   onChange={(event) => setNewGroupName(event.target.value)}
-                  placeholder="New group name"
+                  placeholder="New group name..."
                 />
 
                 <button
                   disabled={
                     selectedChannelIds.length === 0 || !newGroupName.trim()
                   }
-                  onClick={createNewGroupAndMove}
+                  onClick={createNewGroupAndCopy}
                 >
-                  Create group + move
+                  Copy to new group
                 </button>
               </div>
-            </div>
 
-            <div className="channelList">
-              {filteredChannels.slice(0, 500).map((channel) => {
-                const isSelected = selectedChannelIds.includes(channel.id);
+              <div className="tableHeader">
+                <span></span>
+                <span></span>
+                <span>Name</span>
+                <span>Group</span>
+                <span>URL</span>
+              </div>
 
-                return (
-                  <label
-                    key={channel.id}
-                    className={isSelected ? "channelRow selected" : "channelRow"}
-                    draggable
-                    onDragStart={(event) => {
-                      startDraggingChannel(channel.id);
-                      event.dataTransfer.effectAllowed = "move";
-                      event.dataTransfer.setData("text/plain", channel.id);
-                    }}
-                    onDragEnd={() => {
-                      setDraggedChannelIds([]);
-                      setDragOverGroup("");
-                    }}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={isSelected}
-                      onChange={() => toggleChannel(channel.id)}
-                    />
+              <div
+                ref={channelListRef}
+                className="channelList"
+                onDragLeave={(event) => {
+                  if (!event.currentTarget.contains(event.relatedTarget as Node)) {
+                    hideDropIndicator();
+                  }
+                }}
+              >
+                <div ref={dropIndicatorRef} className="dropIndicator" />
 
-                    <div className="channelDetails">
-                      <strong>{channel.name}</strong>
-                      <span>{channel.group}</span>
-                      <small>{channel.url}</small>
+                {visibleChannels.map((channel) => {
+                  const isSelected = selectedChannelSet.has(channel.id);
+                  const isDragging = draggedChannelIds.includes(channel.id);
+
+                  return (
+                    <div
+                      key={channel.id}
+                      className={[
+                        "channelRow",
+                        isSelected ? "selected" : "",
+                        isDragging ? "isDragging" : "",
+                      ]
+                        .filter(Boolean)
+                        .join(" ")}
+                      onClick={() => toggleChannel(channel.id)}
+                      onDragOver={(event) => {
+                        event.preventDefault();
+                        showDropIndicator(event, channel.id);
+                      }}
+                      onDrop={(event) => {
+                        event.preventDefault();
+                        dropChannelsOnChannel();
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => toggleChannel(channel.id)}
+                        onClick={(event) => event.stopPropagation()}
+                      />
+
+                      <span
+                        className="dragDots dragHandle"
+                        draggable
+                        title="Drag channel"
+                        onClick={(event) => event.stopPropagation()}
+                        onDragStart={(event) => {
+                          event.stopPropagation();
+
+                          const ids = startDraggingChannel(channel.id);
+                          const previewText =
+                            ids.length === 1
+                              ? channel.name
+                              : `Moving ${ids.length.toLocaleString()} channels`;
+
+                          const preview = createDragPreview(previewText);
+                          event.dataTransfer.setDragImage(preview, 12, 12);
+
+                          window.setTimeout(() => {
+                            preview.remove();
+                          }, 0);
+
+                          event.dataTransfer.effectAllowed = "move";
+                          event.dataTransfer.setData("text/plain", channel.id);
+                        }}
+                        onDragEnd={resetDragState}
+                      >
+                        ⠿
+                      </span>
+
+                      <div className="channelNameCell">
+                        <div className="channelIcon">▣</div>
+                        <span>{channel.name}</span>
+                      </div>
+
+                      <span className="groupCell">{channel.group}</span>
+                      <span className="urlCell">{channel.url}</span>
                     </div>
-                  </label>
-                );
-              })}
+                  );
+                })}
 
-              {filteredChannels.length > 500 && (
-                <div className="limitNotice">
-                  Showing first 500 results. Use search or group filters to narrow
-                  the list.
-                </div>
-              )}
+                {filteredChannels.length > 1000 && (
+                  <div className="limitNotice">
+                    Showing first 1000 results. Use search or a group filter to
+                    narrow the list.
+                  </div>
+                )}
 
-              {filteredChannels.length === 0 && (
-                <div className="emptyState">No channels found.</div>
-              )}
-            </div>
+                {filteredChannels.length === 0 && (
+                  <div className="emptyState">No channels found.</div>
+                )}
+              </div>
+            </section>
           </section>
-        </section>
+        </>
       )}
     </main>
   );
