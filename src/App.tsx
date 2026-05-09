@@ -1,16 +1,13 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { DragEvent } from "react";
 import {
   ArrowDownToLine,
-  ArrowRight,
   ArrowUpToLine,
   Copy as CopyIcon,
   Eye,
   FolderInput,
   Image as ImageIcon,
   ListFilter,
-  Menu,
-  Monitor,
   MoreVertical,
   Plus,
   Trash2,
@@ -49,6 +46,70 @@ type ChannelEditForm = {
   tvgName: string;
   tvgLogo: string;
 };
+
+type DeleteConfirmState = {
+  channelIds: string[];
+  groupNames: string[];
+};
+
+type BulkRenameMode = "contains" | "begins" | "ends";
+
+type BulkRenameForm = {
+  prefix: string;
+  suffix: string;
+  find: string;
+  replace: string;
+  caseSensitive: boolean;
+  mode: BulkRenameMode;
+};
+
+function ChannelLogo({
+  logo,
+  name,
+  size = 22,
+}: {
+  logo: string;
+  name: string;
+  size?: number;
+}) {
+  const [failed, setFailed] = useState(false);
+
+  const wrapperStyle = {
+    width: size,
+    height: size,
+    minWidth: size,
+    borderRadius: 4,
+    background: "#e5e7eb",
+    display: "grid",
+    placeItems: "center",
+    overflow: "hidden",
+  };
+
+  if (!logo || failed) {
+    return (
+      <div className="channelIcon" style={wrapperStyle}>
+        <ImageIcon size={Math.max(14, size - 8)} strokeWidth={2.2} />
+      </div>
+    );
+  }
+
+  return (
+    <div className="channelIcon" style={wrapperStyle}>
+      <img
+        src={logo}
+        alt={name}
+        loading="lazy"
+        onError={() => setFailed(true)}
+        style={{
+          width: "100%",
+          height: "100%",
+          objectFit: "contain",
+          display: "block",
+        }}
+      />
+    </div>
+  );
+}
 
 function getAttribute(line: string, attribute: string): string {
   const match = line.match(new RegExp(`${attribute}="([^"]*)"`, "i"));
@@ -290,6 +351,71 @@ function moveSelectedGroupsToBottom(order: string[], selected: string[]) {
   ];
 }
 
+function isTypingTarget(target: EventTarget | null) {
+  if (!(target instanceof HTMLElement)) {
+    return false;
+  }
+
+  const tag = target.tagName.toLowerCase();
+
+  if (tag === "textarea" || tag === "select" || target.isContentEditable) {
+    return true;
+  }
+
+  if (tag === "input") {
+    const input = target as HTMLInputElement;
+    const type = input.type.toLowerCase();
+
+    return !["checkbox", "radio", "button", "submit"].includes(type);
+  }
+
+  return false;
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function bulkRenameName(name: string, form: BulkRenameForm) {
+  let nextName = name;
+  const find = form.find;
+
+  if (find) {
+    if (form.mode === "contains") {
+      if (form.caseSensitive) {
+        nextName = nextName.split(find).join(form.replace);
+      } else {
+        nextName = nextName.replace(
+          new RegExp(escapeRegExp(find), "gi"),
+          form.replace
+        );
+      }
+    }
+
+    if (form.mode === "begins") {
+      const compareName = form.caseSensitive ? nextName : nextName.toLowerCase();
+      const compareFind = form.caseSensitive ? find : find.toLowerCase();
+
+      if (compareName.startsWith(compareFind)) {
+        nextName = form.replace + nextName.slice(find.length);
+      }
+    }
+
+    if (form.mode === "ends") {
+      const compareName = form.caseSensitive ? nextName : nextName.toLowerCase();
+      const compareFind = form.caseSensitive ? find : find.toLowerCase();
+
+      if (compareName.endsWith(compareFind)) {
+        nextName = nextName.slice(0, nextName.length - find.length) + form.replace;
+      }
+    }
+  }
+
+  nextName = `${form.prefix}${nextName}${form.suffix}`;
+
+  return nextName.trim() || name;
+}
+
 export default function App() {
   const [channels, setChannels] = useState<Channel[]>([]);
   const [groupOrder, setGroupOrder] = useState<string[]>([]);
@@ -315,6 +441,19 @@ export default function App() {
   const [channelEditForm, setChannelEditForm] = useState<ChannelEditForm | null>(
     null
   );
+  const [logoPreviewOpen, setLogoPreviewOpen] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState<DeleteConfirmState | null>(
+    null
+  );
+  const [bulkRenameOpen, setBulkRenameOpen] = useState(false);
+  const [bulkRenameForm, setBulkRenameForm] = useState<BulkRenameForm>({
+    prefix: "",
+    suffix: "",
+    find: "",
+    replace: "",
+    caseSensitive: false,
+    mode: "contains",
+  });
 
   const channelListRef = useRef<HTMLDivElement | null>(null);
   const dropIndicatorRef = useRef<HTMLDivElement | null>(null);
@@ -327,6 +466,14 @@ export default function App() {
   const selectedGroupSet = useMemo(() => {
     return new Set(selectedGroupNames);
   }, [selectedGroupNames]);
+
+  const selectedLogoChannel = useMemo(() => {
+    if (selectedChannelIds.length !== 1) {
+      return null;
+    }
+
+    return channels.find((channel) => channel.id === selectedChannelIds[0]) || null;
+  }, [channels, selectedChannelIds]);
 
   const groupsFromChannels = useMemo(() => {
     const seen = new Set<string>();
@@ -415,6 +562,21 @@ export default function App() {
         ? [selectedGroup]
         : [];
 
+  const deleteGroupChannelCount = useMemo(() => {
+    if (!deleteConfirm) {
+      return 0;
+    }
+
+    return channels.filter((channel) =>
+      deleteConfirm.groupNames.includes(channel.group)
+    ).length;
+  }, [channels, deleteConfirm]);
+
+  const bulkRenameHasChanges =
+    bulkRenameForm.prefix.trim() ||
+    bulkRenameForm.suffix.trim() ||
+    bulkRenameForm.find.trim();
+
   function showDropIndicator(
     event: DragEvent<HTMLDivElement>,
     channelId: string
@@ -485,6 +647,9 @@ export default function App() {
       setSelectedChannelIds([]);
       setSearchText("");
       setNewGroupName("");
+      setLogoPreviewOpen(false);
+      setDeleteConfirm(null);
+      setBulkRenameOpen(false);
       resetDragState();
     };
 
@@ -602,48 +767,90 @@ export default function App() {
     setRenameGroupValue("");
   }
 
-  function deleteGroups(groupNames: string[]) {
-    if (groupNames.length === 0) {
-      return;
-    }
-
-    const count = channels.filter((channel) =>
-      groupNames.includes(channel.group)
-    ).length;
-
-    const confirmed = window.confirm(
-      `Delete ${groupNames.length} group(s)?\n\n${count} channel(s) will be moved to "No Group".`
-    );
-
-    if (!confirmed) {
-      return;
-    }
+  function performDelete(channelIds: string[], groupNames: string[]) {
+    const channelIdSet = new Set(channelIds);
+    const groupNameSet = new Set(groupNames);
 
     setChannels((current) =>
-      current.map((channel) =>
-        groupNames.includes(channel.group)
-          ? {
-              ...channel,
-              group: "No Group",
-              rawInfo: updateGroupInRawInfo(channel.rawInfo, "No Group"),
-            }
-          : channel
+      current.filter(
+        (channel) =>
+          !channelIdSet.has(channel.id) && !groupNameSet.has(channel.group)
       )
     );
 
-    setGroupOrder((current) => {
-      const next = current.filter((group) => !groupNames.includes(group));
+    if (groupNames.length > 0) {
+      setGroupOrder((current) =>
+        current.filter((group) => !groupNameSet.has(group))
+      );
 
-      if (!next.includes("No Group")) {
-        return ["No Group", ...next];
+      if (groupNameSet.has(selectedGroup)) {
+        setSelectedGroup("All Channels");
       }
+    }
 
-      return next;
-    });
-
-    setSelectedGroup("All Channels");
+    setSelectedChannelIds([]);
     setSelectedGroupNames([]);
     setOpenMenu(null);
+    setDeleteConfirm(null);
+  }
+
+  function requestDelete(channelIds: string[], groupNames: string[]) {
+    if (channelIds.length === 0 && groupNames.length === 0) {
+      return;
+    }
+
+    setOpenMenu(null);
+    setDeleteConfirm({
+      channelIds,
+      groupNames,
+    });
+  }
+
+  function openBulkRename() {
+    if (selectedChannelIds.length === 0) {
+      return;
+    }
+
+    setOpenMenu(null);
+    setBulkRenameOpen(true);
+  }
+
+  function applyBulkRename() {
+    if (selectedChannelIds.length === 0 || !bulkRenameHasChanges) {
+      return;
+    }
+
+    const selectedSet = new Set(selectedChannelIds);
+
+    setChannels((current) =>
+      current.map((channel) => {
+        if (!selectedSet.has(channel.id)) {
+          return channel;
+        }
+
+        const newName = bulkRenameName(channel.name, bulkRenameForm);
+
+        const updatedChannel = {
+          ...channel,
+          name: newName,
+        };
+
+        return {
+          ...updatedChannel,
+          rawInfo: updateChannelRawInfo(updatedChannel),
+        };
+      })
+    );
+
+    setBulkRenameOpen(false);
+    setBulkRenameForm({
+      prefix: "",
+      suffix: "",
+      find: "",
+      replace: "",
+      caseSensitive: false,
+      mode: "contains",
+    });
   }
 
   function moveGroupsToTop(groupNames: string[]) {
@@ -763,29 +970,6 @@ export default function App() {
     moveChannelsToGroup(selectedChannelIds, newGroupName);
   }
 
-  function deleteSelectedChannels() {
-    if (selectedChannelIds.length === 0) {
-      return;
-    }
-
-    const confirmed = window.confirm(
-      `Delete ${selectedChannelIds.length} selected channel(s)?`
-    );
-
-    if (!confirmed) {
-      return;
-    }
-
-    const selectedSet = new Set(selectedChannelIds);
-
-    setChannels((current) =>
-      current.filter((channel) => !selectedSet.has(channel.id))
-    );
-
-    setSelectedChannelIds([]);
-    setOpenMenu(null);
-  }
-
   function moveSelectedToTop() {
     if (selectedChannelIds.length === 0) {
       return;
@@ -853,8 +1037,12 @@ export default function App() {
   }
 
   function openChannelEditor() {
-    if (selectedChannelIds.length !== 1) {
-      window.alert("Select exactly one channel to rename/edit.");
+    if (selectedChannelIds.length === 0) {
+      return;
+    }
+
+    if (selectedChannelIds.length > 1) {
+      openBulkRename();
       return;
     }
 
@@ -910,6 +1098,15 @@ export default function App() {
 
     setChannelEditOpen(false);
     setChannelEditForm(null);
+  }
+
+  function openLogoPreview() {
+    if (selectedChannelIds.length !== 1) {
+      window.alert("Select exactly one channel to preview its logo.");
+      return;
+    }
+
+    setLogoPreviewOpen(true);
   }
 
   function startDraggingChannel(channelId: string) {
@@ -1000,7 +1197,71 @@ export default function App() {
     setRenameGroupValue("");
     setChannelEditOpen(false);
     setChannelEditForm(null);
+    setLogoPreviewOpen(false);
+    setDeleteConfirm(null);
+    setBulkRenameOpen(false);
   }
+
+  useEffect(() => {
+    function handleKeyboard(event: KeyboardEvent) {
+      if (isTypingTarget(event.target)) {
+        return;
+      }
+
+      if (deleteConfirm) {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          performDelete(deleteConfirm.channelIds, deleteConfirm.groupNames);
+          return;
+        }
+
+        if (event.key === "Escape") {
+          event.preventDefault();
+          setDeleteConfirm(null);
+          return;
+        }
+      }
+
+      const anyModalOpen =
+        groupPickerMode ||
+        renameGroupOpen ||
+        channelEditOpen ||
+        logoPreviewOpen ||
+        deleteConfirm ||
+        bulkRenameOpen;
+
+      if (anyModalOpen) {
+        return;
+      }
+
+      if (event.key === "Delete") {
+        const hasSelectedChannels = selectedChannelIds.length > 0;
+        const hasSelectedGroups = selectedGroupNames.length > 0;
+
+        if (!hasSelectedChannels && !hasSelectedGroups) {
+          return;
+        }
+
+        event.preventDefault();
+        requestDelete(selectedChannelIds, selectedGroupNames);
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyboard);
+
+    return () => {
+      window.removeEventListener("keydown", handleKeyboard);
+    };
+  }, [
+    bulkRenameOpen,
+    channelEditOpen,
+    deleteConfirm,
+    groupPickerMode,
+    logoPreviewOpen,
+    renameGroupOpen,
+    selectedChannelIds,
+    selectedGroupNames,
+  ]);
 
   return (
     <main className="app" onClick={() => setOpenMenu(null)}>
@@ -1082,7 +1343,7 @@ export default function App() {
 
               <button
                 className="tooltipButton tooltipLeft"
-                data-tooltip="Clear selection"
+                data-tooltip="Clear all selection"
                 onClick={clearSelection}
               >
                 Clear
@@ -1108,6 +1369,16 @@ export default function App() {
                 </label>
 
                 <div className="miniButtons menuWrap">
+                  {selectedGroupNames.length > 0 && (
+                    <button
+                      className="textActionButton tooltipButton"
+                      data-tooltip="Clear selected groups"
+                      onClick={() => setSelectedGroupNames([])}
+                    >
+                      Clear
+                    </button>
+                  )}
+
                   <button
                     className="iconButton tooltipButton"
                     data-tooltip="Add group"
@@ -1156,7 +1427,7 @@ export default function App() {
 
                       <button
                         disabled={groupActionTargets.length === 0}
-                        onClick={() => deleteGroups(groupActionTargets)}
+                        onClick={() => requestDelete([], groupActionTargets)}
                       >
                         <span className="menuIcon">
                           <Trash2 size={22} strokeWidth={2.5} />
@@ -1313,18 +1584,29 @@ export default function App() {
                 </label>
 
                 <div className="miniButtons menuWrap">
+                  {selectedChannelIds.length > 0 && (
+                    <button
+                      className="textActionButton tooltipButton"
+                      data-tooltip="Clear selected channels"
+                      onClick={() => setSelectedChannelIds([])}
+                    >
+                      Clear
+                    </button>
+                  )}
+
                   <button
                     className="iconButton tooltipButton"
                     data-tooltip="EPG"
                     disabled
                   >
-                    <Monitor size={21} strokeWidth={2.3} />
+                    EPG
                   </button>
 
                   <button
                     className="iconButton tooltipButton"
-                    data-tooltip="Logo"
-                    disabled
+                    data-tooltip="Logo preview"
+                    disabled={selectedChannelIds.length !== 1}
+                    onClick={openLogoPreview}
                   >
                     <ImageIcon size={21} strokeWidth={2.3} />
                   </button>
@@ -1339,8 +1621,9 @@ export default function App() {
 
                   <button
                     className="iconButton tooltipButton"
-                    data-tooltip="Bulk operations"
-                    disabled
+                    data-tooltip="Bulk rename"
+                    disabled={selectedChannelIds.length === 0}
+                    onClick={openBulkRename}
                   >
                     <ListFilter size={22} strokeWidth={2.5} />
                   </button>
@@ -1386,21 +1669,18 @@ export default function App() {
                       className="popupMenu rightMenu m3uMenu"
                       onClick={(event) => event.stopPropagation()}
                     >
-                      <button disabled={selectedChannelIds.length === 0}>
-                        <span className="menuIcon">
-                          <Menu size={23} strokeWidth={2.5} />
-                        </span>
-                        <span>Bulk Edit Fields...</span>
-                      </button>
-
                       <button
-                        disabled={selectedChannelIds.length !== 1}
+                        disabled={selectedChannelIds.length === 0}
                         onClick={openChannelEditor}
                       >
                         <span className="menuIcon">
                           <Type size={23} strokeWidth={2.5} />
                         </span>
-                        <span>Rename / Edit...</span>
+                        <span>
+                          {selectedChannelIds.length > 1
+                            ? "Bulk Rename..."
+                            : "Rename / Edit..."}
+                        </span>
                       </button>
 
                       <button disabled={selectedChannelIds.length === 0}>
@@ -1462,7 +1742,7 @@ export default function App() {
 
                       <button
                         disabled={selectedChannelIds.length === 0}
-                        onClick={deleteSelectedChannels}
+                        onClick={() => requestDelete(selectedChannelIds, [])}
                       >
                         <span className="menuIcon">
                           <Trash2 size={23} strokeWidth={2.5} />
@@ -1624,7 +1904,11 @@ export default function App() {
                       </span>
 
                       <div className="channelNameCell">
-                        <div className="channelIcon">▣</div>
+                        <ChannelLogo
+                          logo={channel.tvgLogo}
+                          name={channel.name}
+                          size={24}
+                        />
                         <span>{channel.name}</span>
                       </div>
 
@@ -1647,6 +1931,221 @@ export default function App() {
               </div>
             </section>
           </section>
+
+          {bulkRenameOpen && (
+            <div className="modalBackdrop" onClick={closeModals}>
+              <div
+                className="channelEditModal"
+                onClick={(event) => event.stopPropagation()}
+                style={{ width: 640 }}
+              >
+                <div className="modalTitle">
+                  <span>
+                    <Type size={26} />
+                  </span>
+                  <h2>Bulk Rename</h2>
+                  <em>{selectedChannelIds.length.toLocaleString()} selected</em>
+                </div>
+
+                <div className="editForm">
+                  <div
+                    style={{
+                      border: "1px solid #e5e7eb",
+                      borderRadius: 12,
+                      padding: 16,
+                      background: "#f9fafb",
+                    }}
+                  >
+                    <strong>Prefix & Suffix</strong>
+                    <div
+                      style={{
+                        color: "#6b7280",
+                        marginTop: 4,
+                        marginBottom: 12,
+                      }}
+                    >
+                      Add fixed text to the beginning or end of every name.
+                    </div>
+
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                      <label>
+                        Prefix
+                        <input
+                          value={bulkRenameForm.prefix}
+                          onChange={(event) =>
+                            setBulkRenameForm({
+                              ...bulkRenameForm,
+                              prefix: event.target.value,
+                            })
+                          }
+                          placeholder="Prefix"
+                        />
+                      </label>
+
+                      <label>
+                        Suffix
+                        <input
+                          value={bulkRenameForm.suffix}
+                          onChange={(event) =>
+                            setBulkRenameForm({
+                              ...bulkRenameForm,
+                              suffix: event.target.value,
+                            })
+                          }
+                          placeholder="Suffix"
+                        />
+                      </label>
+                    </div>
+                  </div>
+
+                  <div
+                    style={{
+                      border: "1px solid #e5e7eb",
+                      borderRadius: 12,
+                      padding: 16,
+                      background: "#f9fafb",
+                    }}
+                  >
+                    <strong>Find & Replace</strong>
+                    <div
+                      style={{
+                        color: "#6b7280",
+                        marginTop: 4,
+                        marginBottom: 12,
+                      }}
+                    >
+                      Search text in the channel name and replace it.
+                    </div>
+
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                      <label>
+                        Find
+                        <input
+                          value={bulkRenameForm.find}
+                          onChange={(event) =>
+                            setBulkRenameForm({
+                              ...bulkRenameForm,
+                              find: event.target.value,
+                            })
+                          }
+                          placeholder="Find"
+                        />
+                      </label>
+
+                      <label>
+                        Replace with
+                        <input
+                          value={bulkRenameForm.replace}
+                          onChange={(event) =>
+                            setBulkRenameForm({
+                              ...bulkRenameForm,
+                              replace: event.target.value,
+                            })
+                          }
+                          placeholder="Replace with"
+                        />
+                      </label>
+                    </div>
+
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
+                        marginTop: 12,
+                      }}
+                    >
+                      <input
+                        id="case-sensitive-checkbox"
+                        type="checkbox"
+                        checked={bulkRenameForm.caseSensitive}
+                        onChange={(event) =>
+                          setBulkRenameForm({
+                            ...bulkRenameForm,
+                            caseSensitive: event.target.checked,
+                          })
+                        }
+                        style={{
+                          width: 18,
+                          height: 18,
+                          margin: 0,
+                        }}
+                      />
+
+                      <label
+                        htmlFor="case-sensitive-checkbox"
+                        style={{
+                          display: "inline",
+                          margin: 0,
+                          fontWeight: 500,
+                          color: "#374151",
+                          cursor: "pointer",
+                        }}
+                      >
+                        Case-sensitive
+                      </label>
+                    </div>
+
+                    <div style={{ marginTop: 14 }}>
+                      <strong>Match mode</strong>
+                      <div
+                        style={{
+                          display: "grid",
+                          gridTemplateColumns: "1fr 1fr 1fr",
+                          border: "1px solid #d1d5db",
+                          borderRadius: 10,
+                          overflow: "hidden",
+                          marginTop: 8,
+                        }}
+                      >
+                        {(["contains", "begins", "ends"] as BulkRenameMode[]).map(
+                          (mode) => (
+                            <button
+                              key={mode}
+                              style={{
+                                border: 0,
+                                padding: "10px 12px",
+                                background:
+                                  bulkRenameForm.mode === mode
+                                    ? "#dbeafe"
+                                    : "white",
+                                color: "#111827",
+                                fontWeight:
+                                  bulkRenameForm.mode === mode ? 700 : 500,
+                              }}
+                              onClick={() =>
+                                setBulkRenameForm({
+                                  ...bulkRenameForm,
+                                  mode,
+                                })
+                              }
+                            >
+                              {mode === "contains"
+                                ? "Contains"
+                                : mode === "begins"
+                                  ? "Begins with"
+                                  : "Ends with"}
+                            </button>
+                          )
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="modalFooter">
+                  <button onClick={closeModals}>Cancel</button>
+                  <button
+                    className="confirmButton"
+                    disabled={!bulkRenameHasChanges}
+                    onClick={applyBulkRename}
+                  >
+                    Apply
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
 
           {groupPickerMode && (
             <div className="modalBackdrop" onClick={closeModals}>
@@ -1820,6 +2319,149 @@ export default function App() {
                   <button onClick={closeModals}>Cancel</button>
                   <button className="confirmButton" onClick={saveChannelEdit}>
                     Save changes
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {logoPreviewOpen && selectedLogoChannel && (
+            <div className="modalBackdrop" onClick={closeModals}>
+              <div
+                className="smallModal"
+                onClick={(event) => event.stopPropagation()}
+                style={{ width: 520 }}
+              >
+                <h2>Logo Preview</h2>
+
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 16,
+                    padding: "14px 0",
+                  }}
+                >
+                  <ChannelLogo
+                    logo={selectedLogoChannel.tvgLogo}
+                    name={selectedLogoChannel.name}
+                    size={96}
+                  />
+
+                  <div style={{ minWidth: 0 }}>
+                    <strong>{selectedLogoChannel.name}</strong>
+                    <div style={{ color: "#6b7280", marginTop: 4 }}>
+                      {selectedLogoChannel.group}
+                    </div>
+                    <div
+                      style={{
+                        color: "#6b7280",
+                        fontSize: 12,
+                        marginTop: 8,
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                        maxWidth: 360,
+                      }}
+                    >
+                      {selectedLogoChannel.tvgLogo || "No logo URL found"}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="modalFooter">
+                  <button onClick={closeModals}>Close</button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {deleteConfirm && (
+            <div className="modalBackdrop" onClick={closeModals}>
+              <div
+                className="smallModal"
+                onClick={(event) => event.stopPropagation()}
+                style={{ width: 500 }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 12,
+                    marginBottom: 14,
+                  }}
+                >
+                  <div
+                    style={{
+                      width: 42,
+                      height: 42,
+                      borderRadius: 12,
+                      display: "grid",
+                      placeItems: "center",
+                      background: "#fee2e2",
+                      color: "#dc2626",
+                    }}
+                  >
+                    <Trash2 size={24} strokeWidth={2.5} />
+                  </div>
+
+                  <div>
+                    <h2 style={{ margin: 0 }}>Delete selected?</h2>
+                    <div style={{ color: "#6b7280", fontSize: 13 }}>
+                      Press Enter to delete, or Esc to cancel.
+                    </div>
+                  </div>
+                </div>
+
+                <div
+                  style={{
+                    border: "1px solid #e5e7eb",
+                    borderRadius: 12,
+                    padding: 14,
+                    background: "#f9fafb",
+                    lineHeight: 1.7,
+                  }}
+                >
+                  {deleteConfirm.channelIds.length > 0 && (
+                    <div>
+                      <strong>
+                        {deleteConfirm.channelIds.length.toLocaleString()}
+                      </strong>{" "}
+                      channel(s) will be permanently deleted.
+                    </div>
+                  )}
+
+                  {deleteConfirm.groupNames.length > 0 && (
+                    <div>
+                      <strong>
+                        {deleteConfirm.groupNames.length.toLocaleString()}
+                      </strong>{" "}
+                      group(s) and{" "}
+                      <strong>{deleteGroupChannelCount.toLocaleString()}</strong>{" "}
+                      channel(s) inside them will be permanently deleted.
+                    </div>
+                  )}
+                </div>
+
+                <div className="modalFooter">
+                  <button onClick={() => setDeleteConfirm(null)}>Cancel</button>
+                  <button
+                    onClick={() =>
+                      performDelete(
+                        deleteConfirm.channelIds,
+                        deleteConfirm.groupNames
+                      )
+                    }
+                    style={{
+                      border: 0,
+                      background: "#dc2626",
+                      color: "white",
+                      borderRadius: 10,
+                      padding: "10px 16px",
+                      fontWeight: 700,
+                    }}
+                  >
+                    Delete
                   </button>
                 </div>
               </div>
