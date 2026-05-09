@@ -23,7 +23,7 @@ button {
 button:disabled,
 select:disabled {
   cursor: not-allowed;
-  opacity: 0.45;
+  opacity: 0.48;
 }
 
 .app {
@@ -90,8 +90,7 @@ select:disabled {
 .primaryButton,
 .bigImportButton,
 .stripTools button,
-.actionBar button,
-.miniButtons button {
+.actionBar button {
   border: 0;
   border-radius: 8px;
   background: #3f51b5;
@@ -104,7 +103,7 @@ select:disabled {
 .importButton {
   background: rgba(255, 255, 255, 0.16);
   position: relative;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .importButton input,
@@ -114,6 +113,52 @@ select:disabled {
 
 .primaryButton {
   background: #22c55e;
+}
+
+.tooltipButton {
+  position: relative;
+}
+
+.tooltipButton:hover::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: #111827;
+  color: white;
+  padding: 6px 9px;
+  border-radius: 5px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  z-index: 500;
+  pointer-events: none;
+}
+
+.tooltipButton:hover::before {
+  content: "";
+  position: absolute;
+  top: calc(100% + 3px);
+  left: 50%;
+  transform: translateX(-50%);
+  border: 5px solid transparent;
+  border-bottom-color: #111827;
+  z-index: 500;
+  pointer-events: none;
+}
+
+.tooltipButton.tooltipLeft:hover::after {
+  left: auto;
+  right: 0;
+  transform: none;
+}
+
+.tooltipButton.tooltipLeft:hover::before {
+  left: auto;
+  right: 11px;
+  transform: none;
 }
 
 .emptyImport {
@@ -254,16 +299,118 @@ select:disabled {
   flex: 0 0 auto;
 }
 
-.miniButtons button {
+.iconButton,
+.textActionButton {
+  border: 0;
   background: transparent;
   color: #3f51b5;
   font-weight: 700;
-  min-width: 34px;
-  border-radius: 6px;
+  border-radius: 999px;
+  min-height: 34px;
 }
 
-.miniButtons button:hover {
+.iconButton {
+  min-width: 34px;
+  padding: 0 8px;
+  font-size: 22px;
+  line-height: 1;
+}
+
+.textActionButton {
+  padding: 8px 10px;
+  font-size: 14px;
+}
+
+.iconButton:hover,
+.textActionButton:hover {
   background: #eef2ff;
+}
+
+.activeDotButton {
+  background: #eef2ff;
+  color: #3730a3;
+}
+
+.menuWrap {
+  position: relative;
+}
+
+.popupMenu {
+  position: absolute;
+  top: 42px;
+  right: 0;
+  width: 238px;
+  max-width: 238px;
+  min-width: 238px;
+  background: #f4f4f7;
+  border: 1px solid #d4d4dd;
+  border-radius: 5px;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.24);
+  z-index: 100;
+  padding: 0;
+  overflow: hidden;
+}
+
+.rightMenu {
+  right: 0;
+}
+
+.m3uMenu button {
+  width: 100%;
+  min-height: 52px;
+  height: 52px;
+  border: 0;
+  border-radius: 0;
+  background: #f4f4f7;
+  color: #202124;
+  text-align: left;
+  padding: 0 14px;
+  display: grid;
+  grid-template-columns: 42px 1fr;
+  align-items: center;
+  gap: 0;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.15px;
+}
+
+.m3uMenu button:hover {
+  background: #e7e7ed;
+}
+
+.m3uMenu button:active {
+  background: #dedee7;
+}
+
+.m3uMenu button:disabled {
+  opacity: 0.42;
+}
+
+.m3uMenu hr {
+  border: 0;
+  border-top: 1px solid #dddde5;
+  margin: 0;
+}
+
+.menuIcon {
+  width: 32px;
+  min-width: 32px;
+  color: #3f51b5;
+  font-size: 24px;
+  font-weight: 800;
+  line-height: 1;
+  display: grid;
+  place-items: center;
+  transform: none;
+}
+
+.m3uMenu button span:last-child {
+  font-size: 16px;
+  font-weight: 600;
+  color: #202124;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .groupList {
@@ -273,10 +420,11 @@ select:disabled {
 }
 
 .groupRow {
+  position: relative;
   width: 100%;
   min-height: 44px;
   display: grid;
-  grid-template-columns: 24px 1fr auto;
+  grid-template-columns: 28px 24px 1fr auto;
   align-items: center;
   gap: 8px;
   border: 0;
@@ -285,6 +433,11 @@ select:disabled {
   color: #111827;
   text-align: left;
   padding: 8px 12px;
+}
+
+.groupRow input {
+  width: 18px;
+  height: 18px;
 }
 
 .groupRow:hover {
@@ -296,16 +449,49 @@ select:disabled {
   color: #4338ca;
 }
 
+.groupRow.groupSelected {
+  background: #eef2ff;
+}
+
 .groupRow.dragOver {
   background: #dcfce7;
   outline: 2px solid #22c55e;
   outline-offset: -2px;
 }
 
+.groupRow.groupDragging {
+  opacity: 0.5;
+}
+
+.groupRow.groupDropAbove::before,
+.groupRow.groupDropBelow::after {
+  content: "";
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  height: 3px;
+  background: #3f51b5;
+  border-radius: 999px;
+  z-index: 5;
+  box-shadow: 0 0 0 3px rgba(63, 81, 181, 0.12);
+}
+
+.groupRow.groupDropAbove::before {
+  top: -2px;
+}
+
+.groupRow.groupDropBelow::after {
+  bottom: -2px;
+}
+
 .groupRow small {
-  grid-column: 2 / -1;
+  grid-column: 3 / -1;
   color: #16a34a;
   font-size: 11px;
+}
+
+.allChannelsRow {
+  grid-template-columns: 28px 24px 1fr auto;
 }
 
 .groupName {
@@ -506,6 +692,184 @@ select:disabled {
   text-overflow: ellipsis;
 }
 
+.modalBackdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.38);
+  z-index: 100;
+  display: grid;
+  place-items: center;
+}
+
+.groupPickerModal,
+.smallModal,
+.channelEditModal {
+  background: white;
+  color: #111827;
+  border-radius: 16px;
+  box-shadow: 0 20px 50px rgba(15, 23, 42, 0.32);
+  overflow: hidden;
+}
+
+.groupPickerModal {
+  width: 480px;
+  max-width: calc(100vw - 32px);
+  height: 78vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.smallModal {
+  width: 420px;
+  max-width: calc(100vw - 32px);
+  padding: 20px;
+}
+
+.channelEditModal {
+  width: 620px;
+  max-width: calc(100vw - 32px);
+  display: flex;
+  flex-direction: column;
+}
+
+.smallModal h2 {
+  margin: 0 0 14px;
+}
+
+.smallModal input {
+  width: 100%;
+  border: 1px solid #d1d5db;
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+.modalTitle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 18px 20px;
+}
+
+.modalTitle h2 {
+  margin: 0;
+  font-size: 26px;
+  font-weight: 500;
+}
+
+.modalTitle span {
+  color: #7c3aed;
+  font-size: 24px;
+}
+
+.modalTitle em {
+  color: #9ca3af;
+  font-style: normal;
+  margin-left: auto;
+}
+
+.modalSearch {
+  display: grid;
+  grid-template-columns: 28px 1fr;
+  align-items: center;
+  border-top: 1px solid #e5e7eb;
+  border-bottom: 1px solid #e5e7eb;
+  padding: 10px 16px;
+}
+
+.modalSearch span {
+  color: #3f51b5;
+  font-size: 22px;
+}
+
+.modalSearch input {
+  border: 0;
+  outline: 0;
+  font-size: 16px;
+}
+
+.modalGroupList {
+  overflow: auto;
+  flex: 1;
+}
+
+.modalGroupList button {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 36px 28px 1fr auto;
+  gap: 8px;
+  align-items: center;
+  border: 0;
+  border-bottom: 1px solid #e5e7eb;
+  background: white;
+  color: #111827;
+  text-align: left;
+  padding: 12px 18px;
+}
+
+.modalGroupList button:hover {
+  background: #f8fafc;
+}
+
+.radioCircle {
+  width: 24px;
+  height: 24px;
+  border: 2px solid #4b5563;
+  border-radius: 999px;
+}
+
+.folderIcon {
+  color: #3f51b5;
+}
+
+.modalGroupList em {
+  color: #9ca3af;
+  font-style: normal;
+  font-size: 12px;
+}
+
+.editForm {
+  display: grid;
+  gap: 14px;
+  padding: 0 20px 18px;
+}
+
+.editForm label {
+  display: grid;
+  gap: 6px;
+  font-weight: 700;
+  color: #374151;
+}
+
+.editForm input {
+  width: 100%;
+  border: 1px solid #d1d5db;
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-weight: 400;
+  color: #111827;
+}
+
+.modalFooter {
+  border-top: 1px solid #e5e7eb;
+  padding: 14px 18px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.modalFooter button {
+  border: 0;
+  background: #eef2ff;
+  color: #3730a3;
+  border-radius: 10px;
+  padding: 10px 16px;
+}
+
+.modalFooter .confirmButton {
+  background: #3f51b5;
+  color: white;
+}
+
 .limitNotice,
 .emptyState {
   margin: 14px;
@@ -514,6 +878,85 @@ select:disabled {
   border-radius: 10px;
   padding: 18px;
   text-align: center;
+}
+
+/* HARD FORCE balanced compact menu styling */
+.popupMenu,
+.popupMenu.rightMenu,
+.menuWrap .popupMenu,
+.menuWrap .rightMenu {
+  width: 238px !important;
+  max-width: 238px !important;
+  min-width: 238px !important;
+  background: #f4f4f7 !important;
+  border: 1px solid #d4d4dd !important;
+  border-radius: 5px !important;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.24) !important;
+  overflow: hidden !important;
+}
+
+.m3uMenu button,
+.popupMenu.m3uMenu button,
+.rightMenu.m3uMenu button {
+  width: 100% !important;
+  min-height: 52px !important;
+  height: 52px !important;
+  padding: 0 14px !important;
+  display: grid !important;
+  grid-template-columns: 42px 1fr !important;
+  align-items: center !important;
+  background: #f4f4f7 !important;
+  color: #202124 !important;
+  font-size: 16px !important;
+  font-weight: 600 !important;
+  letter-spacing: -0.15px !important;
+  border-radius: 0 !important;
+}
+
+.m3uMenu button:hover,
+.popupMenu.m3uMenu button:hover,
+.rightMenu.m3uMenu button:hover {
+  background: #e7e7ed !important;
+}
+
+.m3uMenu button:disabled,
+.popupMenu.m3uMenu button:disabled,
+.rightMenu.m3uMenu button:disabled {
+  opacity: 0.42 !important;
+}
+
+.m3uMenu hr,
+.popupMenu.m3uMenu hr,
+.rightMenu.m3uMenu hr {
+  margin: 0 !important;
+  border: 0 !important;
+  border-top: 1px solid #dddde5 !important;
+}
+
+.menuIcon,
+.m3uMenu .menuIcon,
+.popupMenu .menuIcon,
+.rightMenu .menuIcon {
+  width: 32px !important;
+  min-width: 32px !important;
+  color: #3f51b5 !important;
+  font-size: 24px !important;
+  font-weight: 800 !important;
+  line-height: 1 !important;
+  display: grid !important;
+  place-items: center !important;
+  transform: none !important;
+}
+
+.m3uMenu button span:last-child,
+.popupMenu.m3uMenu button span:last-child,
+.rightMenu.m3uMenu button span:last-child {
+  font-size: 16px !important;
+  font-weight: 600 !important;
+  color: #202124 !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
 }
 
 @media (max-width: 1000px) {

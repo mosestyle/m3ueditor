@@ -18,6 +18,22 @@ type DropTarget = {
   position: "above" | "below";
 };
 
+type GroupDropTarget = {
+  group: string;
+  position: "above" | "below";
+};
+
+type GroupPickerMode = "copy" | "move";
+
+type ChannelEditForm = {
+  id: string;
+  name: string;
+  url: string;
+  tvgId: string;
+  tvgName: string;
+  tvgLogo: string;
+};
+
 function getAttribute(line: string, attribute: string): string {
   const match = line.match(new RegExp(`${attribute}="([^"]*)"`, "i"));
   return match?.[1]?.trim() || "";
@@ -78,15 +94,37 @@ function setAttribute(line: string, attribute: string, value: string): string {
   return `${line} ${attribute}="${escapedValue}"`;
 }
 
+function updateChannelNameInRawInfo(rawInfo: string, newName: string): string {
+  const commaIndex = rawInfo.lastIndexOf(",");
+
+  if (commaIndex >= 0) {
+    return `${rawInfo.slice(0, commaIndex + 1)}${newName}`;
+  }
+
+  return `${rawInfo},${newName}`;
+}
+
 function updateGroupInRawInfo(rawInfo: string, newGroup: string): string {
   return setAttribute(rawInfo, "group-title", newGroup);
+}
+
+function updateChannelRawInfo(channel: Channel): string {
+  let line = channel.rawInfo;
+
+  line = updateChannelNameInRawInfo(line, channel.name);
+  line = setAttribute(line, "group-title", channel.group);
+  line = setAttribute(line, "tvg-id", channel.tvgId);
+  line = setAttribute(line, "tvg-name", channel.tvgName);
+  line = setAttribute(line, "tvg-logo", channel.tvgLogo);
+
+  return line;
 }
 
 function exportM3U(channels: Channel[], originalFileName: string) {
   let output = "#EXTM3U\n";
 
   for (const channel of channels) {
-    const updatedInfo = updateGroupInRawInfo(channel.rawInfo, channel.group);
+    const updatedInfo = updateChannelRawInfo(channel);
     output += `${updatedInfo}\n${channel.url}\n`;
   }
 
@@ -103,6 +141,22 @@ function exportM3U(channels: Channel[], originalFileName: string) {
   link.click();
 
   URL.revokeObjectURL(url);
+}
+
+function createDragPreview(text: string) {
+  const preview = document.createElement("div");
+  preview.className = "dragPreview";
+  preview.textContent = text;
+  document.body.appendChild(preview);
+  return preview;
+}
+
+function getRowDropPosition(
+  event: DragEvent<HTMLDivElement | HTMLButtonElement>
+): "above" | "below" {
+  const rect = event.currentTarget.getBoundingClientRect();
+  const middle = rect.top + rect.height / 2;
+  return event.clientY < middle ? "above" : "below";
 }
 
 function moveItemsNearTarget(
@@ -136,31 +190,115 @@ function moveItemsNearTarget(
   ];
 }
 
-function createDragPreview(text: string) {
-  const preview = document.createElement("div");
-  preview.className = "dragPreview";
-  preview.textContent = text;
-  document.body.appendChild(preview);
-  return preview;
+function insertChannelsAtTopOfGroup(
+  current: Channel[],
+  itemsToInsert: Channel[],
+  targetGroup: string,
+  removeIds: string[] = []
+): Channel[] {
+  const removeSet = new Set(removeIds);
+  const remaining = current.filter((channel) => !removeSet.has(channel.id));
+
+  const firstTargetGroupIndex = remaining.findIndex(
+    (channel) => channel.group === targetGroup
+  );
+
+  if (firstTargetGroupIndex === -1) {
+    return [...itemsToInsert, ...remaining];
+  }
+
+  return [
+    ...remaining.slice(0, firstTargetGroupIndex),
+    ...itemsToInsert,
+    ...remaining.slice(firstTargetGroupIndex),
+  ];
 }
 
-function getRowDropPosition(
-  event: DragEvent<HTMLDivElement>
-): "above" | "below" {
-  const rect = event.currentTarget.getBoundingClientRect();
-  const middle = rect.top + rect.height / 2;
-  return event.clientY < middle ? "above" : "below";
+function reorderArrayItem(
+  items: string[],
+  draggedItem: string,
+  targetItem: string,
+  position: "above" | "below"
+): string[] {
+  if (draggedItem === targetItem) {
+    return items;
+  }
+
+  const withoutDragged = items.filter((item) => item !== draggedItem);
+  const targetIndex = withoutDragged.indexOf(targetItem);
+
+  if (targetIndex === -1) {
+    return items;
+  }
+
+  const insertIndex = position === "below" ? targetIndex + 1 : targetIndex;
+
+  return [
+    ...withoutDragged.slice(0, insertIndex),
+    draggedItem,
+    ...withoutDragged.slice(insertIndex),
+  ];
+}
+
+function reorderChannelsByGroupOrder(
+  channels: Channel[],
+  groupOrder: string[]
+): Channel[] {
+  const groupPosition = new Map<string, number>();
+
+  groupOrder.forEach((group, index) => {
+    groupPosition.set(group, index);
+  });
+
+  return [...channels].sort((a, b) => {
+    const aIndex = groupPosition.get(a.group) ?? 999999;
+    const bIndex = groupPosition.get(b.group) ?? 999999;
+
+    return aIndex - bIndex;
+  });
+}
+
+function moveSelectedGroupsToTop(order: string[], selected: string[]) {
+  const selectedSet = new Set(selected);
+  return [
+    ...order.filter((group) => selectedSet.has(group)),
+    ...order.filter((group) => !selectedSet.has(group)),
+  ];
+}
+
+function moveSelectedGroupsToBottom(order: string[], selected: string[]) {
+  const selectedSet = new Set(selected);
+  return [
+    ...order.filter((group) => !selectedSet.has(group)),
+    ...order.filter((group) => selectedSet.has(group)),
+  ];
 }
 
 export default function App() {
   const [channels, setChannels] = useState<Channel[]>([]);
+  const [groupOrder, setGroupOrder] = useState<string[]>([]);
   const [fileName, setFileName] = useState("");
   const [selectedGroup, setSelectedGroup] = useState("All Channels");
+  const [selectedGroupNames, setSelectedGroupNames] = useState<string[]>([]);
   const [selectedChannelIds, setSelectedChannelIds] = useState<string[]>([]);
   const [searchText, setSearchText] = useState("");
   const [newGroupName, setNewGroupName] = useState("");
   const [draggedChannelIds, setDraggedChannelIds] = useState<string[]>([]);
   const [dragOverGroup, setDragOverGroup] = useState("");
+  const [draggedGroup, setDraggedGroup] = useState("");
+  const [groupDropTarget, setGroupDropTarget] = useState<GroupDropTarget | null>(
+    null
+  );
+  const [openMenu, setOpenMenu] = useState<"group" | "channel" | null>(null);
+  const [groupPickerMode, setGroupPickerMode] =
+    useState<GroupPickerMode | null>(null);
+  const [groupPickerSearch, setGroupPickerSearch] = useState("");
+  const [renameGroupOpen, setRenameGroupOpen] = useState(false);
+  const [renameGroupValue, setRenameGroupValue] = useState("");
+  const [channelEditOpen, setChannelEditOpen] = useState(false);
+  const [channelEditForm, setChannelEditForm] = useState<ChannelEditForm | null>(
+    null
+  );
 
   const channelListRef = useRef<HTMLDivElement | null>(null);
   const dropIndicatorRef = useRef<HTMLDivElement | null>(null);
@@ -170,19 +308,35 @@ export default function App() {
     return new Set(selectedChannelIds);
   }, [selectedChannelIds]);
 
-  const groups = useMemo(() => {
+  const selectedGroupSet = useMemo(() => {
+    return new Set(selectedGroupNames);
+  }, [selectedGroupNames]);
+
+  const groupsFromChannels = useMemo(() => {
     const seen = new Set<string>();
-    const orderedGroups: string[] = [];
+    const result: string[] = [];
 
     for (const channel of channels) {
       if (!seen.has(channel.group)) {
         seen.add(channel.group);
-        orderedGroups.push(channel.group);
+        result.push(channel.group);
       }
     }
 
-    return orderedGroups;
+    return result;
   }, [channels]);
+
+  const groups = useMemo(() => {
+    const merged = [...groupOrder];
+
+    for (const group of groupsFromChannels) {
+      if (!merged.includes(group)) {
+        merged.push(group);
+      }
+    }
+
+    return merged;
+  }, [groupOrder, groupsFromChannels]);
 
   const groupCounts = useMemo(() => {
     const counts = new Map<string, number>();
@@ -225,6 +379,26 @@ export default function App() {
     visibleChannels.length > 0 &&
     visibleChannels.every((channel) => selectedChannelSet.has(channel.id));
 
+  const allGroupsSelected =
+    groups.length > 0 && groups.every((group) => selectedGroupSet.has(group));
+
+  const groupPickerGroups = useMemo(() => {
+    const search = groupPickerSearch.trim().toLowerCase();
+
+    if (!search) {
+      return groups;
+    }
+
+    return groups.filter((group) => group.toLowerCase().includes(search));
+  }, [groups, groupPickerSearch]);
+
+  const groupActionTargets =
+    selectedGroupNames.length > 0
+      ? selectedGroupNames
+      : selectedGroup !== "All Channels"
+        ? [selectedGroup]
+        : [];
+
   function showDropIndicator(
     event: DragEvent<HTMLDivElement>,
     channelId: string
@@ -259,8 +433,24 @@ export default function App() {
 
   function resetDragState() {
     setDraggedChannelIds([]);
+    setDraggedGroup("");
     setDragOverGroup("");
+    setGroupDropTarget(null);
     hideDropIndicator();
+  }
+
+  function getInitialGroups(parsedChannels: Channel[]) {
+    const seen = new Set<string>();
+    const result: string[] = [];
+
+    for (const channel of parsedChannels) {
+      if (!seen.has(channel.group)) {
+        seen.add(channel.group);
+        result.push(channel.group);
+      }
+    }
+
+    return result;
   }
 
   function handleFile(file: File) {
@@ -269,10 +459,13 @@ export default function App() {
     reader.onload = () => {
       const text = String(reader.result || "");
       const parsedChannels = parseM3U(text);
+      const initialGroups = getInitialGroups(parsedChannels);
 
       setChannels(parsedChannels);
+      setGroupOrder(initialGroups);
       setFileName(file.name);
       setSelectedGroup("All Channels");
+      setSelectedGroupNames([]);
       setSelectedChannelIds([]);
       setSearchText("");
       setNewGroupName("");
@@ -290,6 +483,25 @@ export default function App() {
 
       return [...current, channelId];
     });
+  }
+
+  function toggleGroupSelection(groupName: string) {
+    setSelectedGroupNames((current) => {
+      if (current.includes(groupName)) {
+        return current.filter((group) => group !== groupName);
+      }
+
+      return [...current, groupName];
+    });
+  }
+
+  function toggleAllGroups() {
+    if (allGroupsSelected) {
+      setSelectedGroupNames([]);
+      return;
+    }
+
+    setSelectedGroupNames(groups);
   }
 
   function toggleAllVisible() {
@@ -310,6 +522,134 @@ export default function App() {
 
   function clearSelection() {
     setSelectedChannelIds([]);
+    setSelectedGroupNames([]);
+  }
+
+  function addEmptyGroup(groupName: string) {
+    const cleanGroupName = groupName.trim();
+
+    if (!cleanGroupName) {
+      return;
+    }
+
+    if (groups.includes(cleanGroupName)) {
+      setSelectedGroup(cleanGroupName);
+      return;
+    }
+
+    setGroupOrder((current) => [cleanGroupName, ...current]);
+    setSelectedGroup(cleanGroupName);
+    setSelectedGroupNames([cleanGroupName]);
+  }
+
+  function addGroupFromButton() {
+    const groupName = window.prompt("New group name:");
+
+    if (!groupName) {
+      return;
+    }
+
+    addEmptyGroup(groupName);
+  }
+
+  function renameGroup(oldGroupName: string, newGroupNameValue: string) {
+    const cleanNewName = newGroupNameValue.trim();
+
+    if (!cleanNewName || oldGroupName === "All Channels") {
+      return;
+    }
+
+    if (groups.includes(cleanNewName) && cleanNewName !== oldGroupName) {
+      window.alert("That group name already exists.");
+      return;
+    }
+
+    setChannels((current) =>
+      current.map((channel) =>
+        channel.group === oldGroupName
+          ? {
+              ...channel,
+              group: cleanNewName,
+              rawInfo: updateGroupInRawInfo(channel.rawInfo, cleanNewName),
+            }
+          : channel
+      )
+    );
+
+    setGroupOrder((current) =>
+      current.map((group) => (group === oldGroupName ? cleanNewName : group))
+    );
+
+    setSelectedGroup(cleanNewName);
+    setSelectedGroupNames([cleanNewName]);
+    setRenameGroupOpen(false);
+    setRenameGroupValue("");
+  }
+
+  function deleteGroups(groupNames: string[]) {
+    if (groupNames.length === 0) {
+      return;
+    }
+
+    const count = channels.filter((channel) =>
+      groupNames.includes(channel.group)
+    ).length;
+
+    const confirmed = window.confirm(
+      `Delete ${groupNames.length} group(s)?\n\n${count} channel(s) will be moved to "No Group".`
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setChannels((current) =>
+      current.map((channel) =>
+        groupNames.includes(channel.group)
+          ? {
+              ...channel,
+              group: "No Group",
+              rawInfo: updateGroupInRawInfo(channel.rawInfo, "No Group"),
+            }
+          : channel
+      )
+    );
+
+    setGroupOrder((current) => {
+      const next = current.filter((group) => !groupNames.includes(group));
+
+      if (!next.includes("No Group")) {
+        return ["No Group", ...next];
+      }
+
+      return next;
+    });
+
+    setSelectedGroup("All Channels");
+    setSelectedGroupNames([]);
+    setOpenMenu(null);
+  }
+
+  function moveGroupsToTop(groupNames: string[]) {
+    if (groupNames.length === 0) {
+      return;
+    }
+
+    const nextOrder = moveSelectedGroupsToTop(groups, groupNames);
+    setGroupOrder(nextOrder);
+    setChannels((current) => reorderChannelsByGroupOrder(current, nextOrder));
+    setOpenMenu(null);
+  }
+
+  function moveGroupsToBottom(groupNames: string[]) {
+    if (groupNames.length === 0) {
+      return;
+    }
+
+    const nextOrder = moveSelectedGroupsToBottom(groups, groupNames);
+    setGroupOrder(nextOrder);
+    setChannels((current) => reorderChannelsByGroupOrder(current, nextOrder));
+    setOpenMenu(null);
   }
 
   function moveChannelsToGroup(channelIds: string[], groupName: string) {
@@ -319,21 +659,37 @@ export default function App() {
       return;
     }
 
-    setChannels((current) =>
-      current.map((channel) =>
-        channelIds.includes(channel.id)
-          ? {
-              ...channel,
-              group: cleanGroupName,
-              rawInfo: updateGroupInRawInfo(channel.rawInfo, cleanGroupName),
-            }
-          : channel
-      )
-    );
+    setGroupOrder((current) => {
+      if (current.includes(cleanGroupName)) {
+        return current;
+      }
+
+      return [cleanGroupName, ...current];
+    });
+
+    setChannels((current) => {
+      const ids = new Set(channelIds);
+
+      const movedChannels = current
+        .filter((channel) => ids.has(channel.id))
+        .map((channel) => ({
+          ...channel,
+          group: cleanGroupName,
+          rawInfo: updateGroupInRawInfo(channel.rawInfo, cleanGroupName),
+        }));
+
+      return insertChannelsAtTopOfGroup(
+        current,
+        movedChannels,
+        cleanGroupName,
+        channelIds
+      );
+    });
 
     setSelectedGroup(cleanGroupName);
     setSelectedChannelIds([]);
     setNewGroupName("");
+    setGroupPickerMode(null);
     resetDragState();
   }
 
@@ -343,6 +699,14 @@ export default function App() {
     if (!cleanGroupName || channelIds.length === 0) {
       return;
     }
+
+    setGroupOrder((current) => {
+      if (current.includes(cleanGroupName)) {
+        return current;
+      }
+
+      return [cleanGroupName, ...current];
+    });
 
     setChannels((current) => {
       const selectedChannels = current.filter((channel) =>
@@ -365,12 +729,13 @@ export default function App() {
           rawInfo: updateGroupInRawInfo(channel.rawInfo, cleanGroupName),
         }));
 
-      return [...current, ...copiedChannels];
+      return insertChannelsAtTopOfGroup(current, copiedChannels, cleanGroupName);
     });
 
     setSelectedGroup(cleanGroupName);
     setSelectedChannelIds([]);
     setNewGroupName("");
+    setGroupPickerMode(null);
     resetDragState();
   }
 
@@ -380,6 +745,155 @@ export default function App() {
 
   function createNewGroupAndMove() {
     moveChannelsToGroup(selectedChannelIds, newGroupName);
+  }
+
+  function deleteSelectedChannels() {
+    if (selectedChannelIds.length === 0) {
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Delete ${selectedChannelIds.length} selected channel(s)?`
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    const selectedSet = new Set(selectedChannelIds);
+
+    setChannels((current) =>
+      current.filter((channel) => !selectedSet.has(channel.id))
+    );
+
+    setSelectedChannelIds([]);
+    setOpenMenu(null);
+  }
+
+  function moveSelectedToTop() {
+    if (selectedChannelIds.length === 0) {
+      return;
+    }
+
+    const selectedSet = new Set(selectedChannelIds);
+
+    setChannels((current) => {
+      const selected = current.filter((channel) => selectedSet.has(channel.id));
+      const rest = current.filter((channel) => !selectedSet.has(channel.id));
+
+      if (selectedGroup === "All Channels") {
+        return [...selected, ...rest];
+      }
+
+      const firstGroupIndex = rest.findIndex(
+        (channel) => channel.group === selectedGroup
+      );
+
+      if (firstGroupIndex === -1) {
+        return [...selected, ...rest];
+      }
+
+      return [
+        ...rest.slice(0, firstGroupIndex),
+        ...selected,
+        ...rest.slice(firstGroupIndex),
+      ];
+    });
+
+    setOpenMenu(null);
+  }
+
+  function moveSelectedToBottom() {
+    if (selectedChannelIds.length === 0) {
+      return;
+    }
+
+    const selectedSet = new Set(selectedChannelIds);
+
+    setChannels((current) => {
+      const selected = current.filter((channel) => selectedSet.has(channel.id));
+      const rest = current.filter((channel) => !selectedSet.has(channel.id));
+
+      if (selectedGroup === "All Channels") {
+        return [...rest, ...selected];
+      }
+
+      const lastGroupIndex = rest
+        .map((channel) => channel.group)
+        .lastIndexOf(selectedGroup);
+
+      if (lastGroupIndex === -1) {
+        return [...rest, ...selected];
+      }
+
+      return [
+        ...rest.slice(0, lastGroupIndex + 1),
+        ...selected,
+        ...rest.slice(lastGroupIndex + 1),
+      ];
+    });
+
+    setOpenMenu(null);
+  }
+
+  function openChannelEditor() {
+    if (selectedChannelIds.length !== 1) {
+      window.alert("Select exactly one channel to rename/edit.");
+      return;
+    }
+
+    const selectedChannel = channels.find(
+      (channel) => channel.id === selectedChannelIds[0]
+    );
+
+    if (!selectedChannel) {
+      return;
+    }
+
+    setChannelEditForm({
+      id: selectedChannel.id,
+      name: selectedChannel.name,
+      url: selectedChannel.url,
+      tvgId: selectedChannel.tvgId,
+      tvgName: selectedChannel.tvgName,
+      tvgLogo: selectedChannel.tvgLogo,
+    });
+
+    setChannelEditOpen(true);
+    setOpenMenu(null);
+  }
+
+  function saveChannelEdit() {
+    if (!channelEditForm) {
+      return;
+    }
+
+    const cleanName = channelEditForm.name.trim() || "Unnamed channel";
+
+    setChannels((current) =>
+      current.map((channel) => {
+        if (channel.id !== channelEditForm.id) {
+          return channel;
+        }
+
+        const updatedChannel: Channel = {
+          ...channel,
+          name: cleanName,
+          url: channelEditForm.url.trim(),
+          tvgId: channelEditForm.tvgId.trim(),
+          tvgName: channelEditForm.tvgName.trim(),
+          tvgLogo: channelEditForm.tvgLogo.trim(),
+        };
+
+        return {
+          ...updatedChannel,
+          rawInfo: updateChannelRawInfo(updatedChannel),
+        };
+      })
+    );
+
+    setChannelEditOpen(false);
+    setChannelEditForm(null);
   }
 
   function startDraggingChannel(channelId: string) {
@@ -420,6 +934,24 @@ export default function App() {
     resetDragState();
   }
 
+  function handleGroupDrop(targetGroup: string) {
+    if (draggedGroup && draggedGroup !== targetGroup && groupDropTarget) {
+      const nextOrder = reorderArrayItem(
+        groups,
+        draggedGroup,
+        targetGroup,
+        groupDropTarget.position
+      );
+
+      setGroupOrder(nextOrder);
+      setChannels((current) => reorderChannelsByGroupOrder(current, nextOrder));
+      resetDragState();
+      return;
+    }
+
+    dropChannelsOnGroup(targetGroup);
+  }
+
   function getDragText() {
     if (draggedChannelIds.length === 0) {
       return "";
@@ -432,8 +964,30 @@ export default function App() {
     return `Copy ${draggedChannelIds.length.toLocaleString()} channels`;
   }
 
+  function openRenameModal() {
+    const target =
+      groupActionTargets.length === 1 ? groupActionTargets[0] : selectedGroup;
+
+    if (!target || target === "All Channels" || groupActionTargets.length > 1) {
+      return;
+    }
+
+    setRenameGroupValue(target);
+    setRenameGroupOpen(true);
+    setOpenMenu(null);
+  }
+
+  function closeModals() {
+    setGroupPickerMode(null);
+    setGroupPickerSearch("");
+    setRenameGroupOpen(false);
+    setRenameGroupValue("");
+    setChannelEditOpen(false);
+    setChannelEditForm(null);
+  }
+
   return (
-    <main className="app">
+    <main className="app" onClick={() => setOpenMenu(null)}>
       <header className="topBar">
         <div className="brand">
           <div className="logoMark">M</div>
@@ -444,7 +998,7 @@ export default function App() {
         </div>
 
         <div className="topActions">
-          <label className="importButton">
+          <label className="importButton tooltipButton tooltipLeft" data-tooltip="Import M3U">
             Import M3U
             <input
               type="file"
@@ -457,7 +1011,8 @@ export default function App() {
           </label>
 
           <button
-            className="primaryButton"
+            className="primaryButton tooltipButton tooltipLeft"
+            data-tooltip="Export M3U"
             disabled={channels.length === 0}
             onClick={() => exportM3U(channels, fileName)}
           >
@@ -501,11 +1056,21 @@ export default function App() {
                 placeholder="Search all channels..."
               />
 
-              <button onClick={toggleAllVisible}>
+              <button
+                className="tooltipButton"
+                data-tooltip="Select visible channels"
+                onClick={toggleAllVisible}
+              >
                 {allVisibleSelected ? "Unselect visible" : "Select visible"}
               </button>
 
-              <button onClick={clearSelection}>Clear</button>
+              <button
+                className="tooltipButton tooltipLeft"
+                data-tooltip="Clear selection"
+                onClick={clearSelection}
+              >
+                Clear
+              </button>
             </div>
           </section>
 
@@ -515,27 +1080,99 @@ export default function App() {
                 <label>
                   <input
                     type="checkbox"
-                    checked={selectedGroup === "All Channels"}
-                    onChange={() => setSelectedGroup("All Channels")}
+                    checked={allGroupsSelected}
+                    onChange={toggleAllGroups}
                   />
                   <strong>Groups</strong>
-                  <span>{groups.length}</span>
+                  <span>
+                    {groups.length}
+                    {selectedGroupNames.length > 0 &&
+                      ` • ${selectedGroupNames.length} selected`}
+                  </span>
                 </label>
 
-                <div className="miniButtons">
-                  <button title="Add group">+</button>
-                  <button title="Group options">⋮</button>
+                <div className="miniButtons menuWrap">
+                  <button
+                    className="iconButton tooltipButton"
+                    data-tooltip="Add group"
+                    title=""
+                    onClick={addGroupFromButton}
+                  >
+                    +
+                  </button>
+
+                  <button
+                    className="iconButton tooltipButton tooltipLeft activeDotButton"
+                    data-tooltip="Group options"
+                    title=""
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setOpenMenu(openMenu === "group" ? null : "group");
+                    }}
+                  >
+                    ⋮
+                  </button>
+
+                  {openMenu === "group" && (
+                    <div
+                      className="popupMenu m3uMenu"
+                      onClick={(event) => event.stopPropagation()}
+                    >
+                      <button onClick={addGroupFromButton}>
+                        <span className="menuIcon">＋</span>
+                        <span>Add group</span>
+                      </button>
+
+                      <button
+                        disabled={
+                          groupActionTargets.length !== 1 ||
+                          groupActionTargets[0] === "All Channels"
+                        }
+                        onClick={openRenameModal}
+                      >
+                        <span className="menuIcon">Tᵀ</span>
+                        <span>Rename group</span>
+                      </button>
+
+                      <button
+                        disabled={groupActionTargets.length === 0}
+                        onClick={() => deleteGroups(groupActionTargets)}
+                      >
+                        <span className="menuIcon">⌫</span>
+                        <span>Delete group(s)</span>
+                      </button>
+
+                      <hr />
+
+                      <button
+                        disabled={groupActionTargets.length === 0}
+                        onClick={() => moveGroupsToTop(groupActionTargets)}
+                      >
+                        <span className="menuIcon">↑</span>
+                        <span>Move group(s) to top</span>
+                      </button>
+
+                      <button
+                        disabled={groupActionTargets.length === 0}
+                        onClick={() => moveGroupsToBottom(groupActionTargets)}
+                      >
+                        <span className="menuIcon">↓</span>
+                        <span>Move group(s) to bottom</span>
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
 
               <button
                 className={
                   selectedGroup === "All Channels"
-                    ? "groupRow active"
-                    : "groupRow"
+                    ? "groupRow allChannelsRow active"
+                    : "groupRow allChannelsRow"
                 }
                 onClick={() => setSelectedGroup("All Channels")}
               >
+                <span></span>
                 <span className="dragDots">⠿</span>
                 <span>All Channels</span>
                 <em>{channels.length.toLocaleString()}</em>
@@ -544,11 +1181,19 @@ export default function App() {
               <div className="groupList">
                 {groups.map((group) => {
                   const count = groupCounts.get(group) || 0;
+                  const dropPosition =
+                    groupDropTarget?.group === group
+                      ? groupDropTarget.position
+                      : null;
 
                   const className = [
                     "groupRow",
                     selectedGroup === group ? "active" : "",
+                    selectedGroupSet.has(group) ? "groupSelected" : "",
                     dragOverGroup === group ? "dragOver" : "",
+                    draggedGroup === group ? "groupDragging" : "",
+                    dropPosition === "above" ? "groupDropAbove" : "",
+                    dropPosition === "below" ? "groupDropBelow" : "",
                   ]
                     .filter(Boolean)
                     .join(" ");
@@ -560,23 +1205,65 @@ export default function App() {
                       onClick={() => setSelectedGroup(group)}
                       onDragOver={(event) => {
                         event.preventDefault();
+
+                        if (draggedGroup && draggedGroup !== group) {
+                          setGroupDropTarget({
+                            group,
+                            position: getRowDropPosition(event),
+                          });
+                          return;
+                        }
+
                         if (dragOverGroup !== group) {
                           setDragOverGroup(group);
                         }
                       }}
-                      onDragLeave={() => setDragOverGroup("")}
+                      onDragLeave={() => {
+                        setDragOverGroup("");
+                        setGroupDropTarget(null);
+                      }}
                       onDrop={(event) => {
                         event.preventDefault();
-                        dropChannelsOnGroup(group);
+                        handleGroupDrop(group);
                       }}
                     >
-                      <span className="dragDots">⠿</span>
+                      <input
+                        type="checkbox"
+                        checked={selectedGroupSet.has(group)}
+                        onClick={(event) => event.stopPropagation()}
+                        onChange={() => toggleGroupSelection(group)}
+                      />
+
+                      <span
+                        className="dragDots dragHandle"
+                        draggable
+                        title=""
+                        onClick={(event) => event.stopPropagation()}
+                        onDragStart={(event) => {
+                          event.stopPropagation();
+                          setDraggedGroup(group);
+
+                          const preview = createDragPreview(`Move group: ${group}`);
+                          event.dataTransfer.setDragImage(preview, 12, 12);
+
+                          window.setTimeout(() => {
+                            preview.remove();
+                          }, 0);
+
+                          event.dataTransfer.effectAllowed = "move";
+                          event.dataTransfer.setData("text/plain", group);
+                        }}
+                        onDragEnd={resetDragState}
+                      >
+                        ⠿
+                      </span>
+
                       <span className="groupName">{group}</span>
                       <em>{count.toLocaleString()}</em>
 
-                      {dragOverGroup === group && draggedChannelIds.length > 0 && (
-                        <small>{getDragText()}</small>
-                      )}
+                      {dragOverGroup === group &&
+                        draggedChannelIds.length > 0 &&
+                        !draggedGroup && <small>{getDragText()}</small>}
                     </button>
                   );
                 })}
@@ -599,24 +1286,149 @@ export default function App() {
                   </span>
                 </label>
 
-                <div className="miniButtons">
+                <div className="miniButtons menuWrap">
+                  <button
+                    className="iconButton tooltipButton"
+                    data-tooltip="EPG"
+                    disabled
+                  >
+                    ▭
+                  </button>
+
+                  <button
+                    className="iconButton tooltipButton"
+                    data-tooltip="Logo"
+                    disabled
+                  >
+                    ▧
+                  </button>
+
+                  <button
+                    className="iconButton tooltipButton"
+                    data-tooltip="Add channel"
+                    disabled
+                  >
+                    +
+                  </button>
+
+                  <button
+                    className="iconButton tooltipButton"
+                    data-tooltip="Bulk operations"
+                    disabled
+                  >
+                    ≡
+                  </button>
+
                   <button
                     disabled={selectedChannelIds.length === 0}
-                    onClick={createNewGroupAndCopy}
-                    title="Copy selected to new group"
+                    className="textActionButton tooltipButton"
+                    data-tooltip="Copy selected to group"
+                    onClick={() => {
+                      setGroupPickerMode("copy");
+                      setOpenMenu(null);
+                    }}
                   >
                     Copy +
                   </button>
 
                   <button
                     disabled={selectedChannelIds.length === 0}
-                    onClick={createNewGroupAndMove}
-                    title="Move selected to new group"
+                    className="textActionButton tooltipButton"
+                    data-tooltip="Move selected to group"
+                    onClick={() => {
+                      setGroupPickerMode("move");
+                      setOpenMenu(null);
+                    }}
                   >
                     Move +
                   </button>
 
-                  <button title="More actions">⋮</button>
+                  <button
+                    className="iconButton tooltipButton tooltipLeft activeDotButton"
+                    data-tooltip="More options"
+                    title=""
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setOpenMenu(openMenu === "channel" ? null : "channel");
+                    }}
+                  >
+                    ⋮
+                  </button>
+
+                  {openMenu === "channel" && (
+                    <div
+                      className="popupMenu rightMenu m3uMenu"
+                      onClick={(event) => event.stopPropagation()}
+                    >
+                      <button disabled={selectedChannelIds.length === 0}>
+                        <span className="menuIcon">☰</span>
+                        <span>Bulk Edit Fields...</span>
+                      </button>
+
+                      <button
+                        disabled={selectedChannelIds.length !== 1}
+                        onClick={openChannelEditor}
+                      >
+                        <span className="menuIcon">Tᵀ</span>
+                        <span>Rename / Edit...</span>
+                      </button>
+
+                      <button disabled={selectedChannelIds.length === 0}>
+                        <span className="menuIcon">◉</span>
+                        <span>Show / Hide...</span>
+                      </button>
+
+                      <button
+                        disabled={selectedChannelIds.length === 0}
+                        onClick={() => {
+                          setGroupPickerMode("move");
+                          setOpenMenu(null);
+                        }}
+                      >
+                        <span className="menuIcon">➜</span>
+                        <span>Move to group...</span>
+                      </button>
+
+                      <button
+                        disabled={selectedChannelIds.length === 0}
+                        onClick={() => {
+                          setGroupPickerMode("copy");
+                          setOpenMenu(null);
+                        }}
+                      >
+                        <span className="menuIcon">▣</span>
+                        <span>Copy to group...</span>
+                      </button>
+
+                      <hr />
+
+                      <button
+                        disabled={selectedChannelIds.length === 0}
+                        onClick={moveSelectedToTop}
+                      >
+                        <span className="menuIcon">↑</span>
+                        <span>Move to top</span>
+                      </button>
+
+                      <button
+                        disabled={selectedChannelIds.length === 0}
+                        onClick={moveSelectedToBottom}
+                      >
+                        <span className="menuIcon">↓</span>
+                        <span>Move to bottom</span>
+                      </button>
+
+                      <hr />
+
+                      <button
+                        disabled={selectedChannelIds.length === 0}
+                        onClick={deleteSelectedChannels}
+                      >
+                        <span className="menuIcon">⌫</span>
+                        <span>Delete selected</span>
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -667,6 +1479,15 @@ export default function App() {
                 >
                   Copy to new group
                 </button>
+
+                <button
+                  disabled={
+                    selectedChannelIds.length === 0 || !newGroupName.trim()
+                  }
+                  onClick={createNewGroupAndMove}
+                >
+                  Move to new group
+                </button>
               </div>
 
               <div className="tableHeader">
@@ -703,6 +1524,18 @@ export default function App() {
                         .filter(Boolean)
                         .join(" ")}
                       onClick={() => toggleChannel(channel.id)}
+                      onDoubleClick={() => {
+                        setSelectedChannelIds([channel.id]);
+                        setChannelEditForm({
+                          id: channel.id,
+                          name: channel.name,
+                          url: channel.url,
+                          tvgId: channel.tvgId,
+                          tvgName: channel.tvgName,
+                          tvgLogo: channel.tvgLogo,
+                        });
+                        setChannelEditOpen(true);
+                      }}
                       onDragOver={(event) => {
                         event.preventDefault();
                         showDropIndicator(event, channel.id);
@@ -722,7 +1555,7 @@ export default function App() {
                       <span
                         className="dragDots dragHandle"
                         draggable
-                        title="Drag channel"
+                        title=""
                         onClick={(event) => event.stopPropagation()}
                         onDragStart={(event) => {
                           event.stopPropagation();
@@ -772,6 +1605,176 @@ export default function App() {
               </div>
             </section>
           </section>
+
+          {groupPickerMode && (
+            <div className="modalBackdrop" onClick={closeModals}>
+              <div
+                className="groupPickerModal"
+                onClick={(event) => event.stopPropagation()}
+              >
+                <div className="modalTitle">
+                  <span>{groupPickerMode === "copy" ? "▣" : "➜"}</span>
+                  <h2>
+                    {groupPickerMode === "copy"
+                      ? "Copy to Group"
+                      : "Move to Group"}
+                  </h2>
+                  <em>{selectedChannelIds.length} channels</em>
+                </div>
+
+                <div className="modalSearch">
+                  <span>⌕</span>
+                  <input
+                    autoFocus
+                    value={groupPickerSearch}
+                    onChange={(event) => setGroupPickerSearch(event.target.value)}
+                    placeholder="Search groups..."
+                  />
+                </div>
+
+                <div className="modalGroupList">
+                  {groupPickerGroups.map((group) => (
+                    <button
+                      key={group}
+                      onClick={() => {
+                        if (groupPickerMode === "copy") {
+                          copyChannelsToGroup(selectedChannelIds, group);
+                        } else {
+                          moveChannelsToGroup(selectedChannelIds, group);
+                        }
+                      }}
+                    >
+                      <span className="radioCircle"></span>
+                      <span className="folderIcon">■</span>
+                      <span>{group}</span>
+                      <em>{groupCounts.get(group) || 0}</em>
+                    </button>
+                  ))}
+                </div>
+
+                <div className="modalFooter">
+                  <button onClick={closeModals}>Cancel</button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {renameGroupOpen && (
+            <div className="modalBackdrop" onClick={closeModals}>
+              <div
+                className="smallModal"
+                onClick={(event) => event.stopPropagation()}
+              >
+                <h2>Rename group</h2>
+                <input
+                  autoFocus
+                  value={renameGroupValue}
+                  onChange={(event) => setRenameGroupValue(event.target.value)}
+                />
+
+                <div className="modalFooter">
+                  <button onClick={closeModals}>Cancel</button>
+                  <button
+                    className="confirmButton"
+                    onClick={() =>
+                      renameGroup(groupActionTargets[0], renameGroupValue)
+                    }
+                  >
+                    Rename
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {channelEditOpen && channelEditForm && (
+            <div className="modalBackdrop" onClick={closeModals}>
+              <div
+                className="channelEditModal"
+                onClick={(event) => event.stopPropagation()}
+              >
+                <div className="modalTitle">
+                  <span>Tᵀ</span>
+                  <h2>Rename / Edit Channel</h2>
+                </div>
+
+                <div className="editForm">
+                  <label>
+                    Channel name
+                    <input
+                      autoFocus
+                      value={channelEditForm.name}
+                      onChange={(event) =>
+                        setChannelEditForm({
+                          ...channelEditForm,
+                          name: event.target.value,
+                        })
+                      }
+                    />
+                  </label>
+
+                  <label>
+                    Stream URL
+                    <input
+                      value={channelEditForm.url}
+                      onChange={(event) =>
+                        setChannelEditForm({
+                          ...channelEditForm,
+                          url: event.target.value,
+                        })
+                      }
+                    />
+                  </label>
+
+                  <label>
+                    tvg-id
+                    <input
+                      value={channelEditForm.tvgId}
+                      onChange={(event) =>
+                        setChannelEditForm({
+                          ...channelEditForm,
+                          tvgId: event.target.value,
+                        })
+                      }
+                    />
+                  </label>
+
+                  <label>
+                    tvg-name
+                    <input
+                      value={channelEditForm.tvgName}
+                      onChange={(event) =>
+                        setChannelEditForm({
+                          ...channelEditForm,
+                          tvgName: event.target.value,
+                        })
+                      }
+                    />
+                  </label>
+
+                  <label>
+                    tvg-logo
+                    <input
+                      value={channelEditForm.tvgLogo}
+                      onChange={(event) =>
+                        setChannelEditForm({
+                          ...channelEditForm,
+                          tvgLogo: event.target.value,
+                        })
+                      }
+                    />
+                  </label>
+                </div>
+
+                <div className="modalFooter">
+                  <button onClick={closeModals}>Cancel</button>
+                  <button className="confirmButton" onClick={saveChannelEdit}>
+                    Save changes
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </>
       )}
     </main>
