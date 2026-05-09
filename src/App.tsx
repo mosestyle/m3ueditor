@@ -26,6 +26,24 @@ type Channel = {
   tvgLogo: string;
 };
 
+type EpgChannel = {
+  id: string;
+  names: string[];
+};
+
+type EpgMatchStatus =
+  | "no-epg"
+  | "not-target-group"
+  | "matched-id"
+  | "matched-name"
+  | "missing-id"
+  | "empty-id";
+
+type EpgMatch = {
+  status: EpgMatchStatus;
+  epgChannel: EpgChannel | null;
+};
+
 type DropTarget = {
   channelId: string;
   position: "above" | "below";
@@ -61,6 +79,12 @@ type BulkRenameForm = {
   replace: string;
   caseSensitive: boolean;
   mode: BulkRenameMode;
+};
+
+type EpgIndexes = {
+  byId: Map<string, EpgChannel>;
+  byExactName: Map<string, EpgChannel[]>;
+  byCleanName: Map<string, EpgChannel[]>;
 };
 
 function ChannelLogo({
@@ -111,6 +135,64 @@ function ChannelLogo({
   );
 }
 
+function normalizeText(value: string) {
+  return value.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function decodeXmlEntities(value: string) {
+  return value
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">");
+}
+
+function cleanNameForEpg(value: string) {
+  let text = normalizeText(value);
+
+  text = decodeXmlEntities(text);
+
+  text = text.replace(/^[a-z]{2,5}\s*:\s*/i, "");
+
+  text = text.replace(/\[[^\]]*\]/g, " ");
+  text = text.replace(/\([^)]*\)/g, " ");
+  text = text.replace(/\{[^}]*\}/g, " ");
+
+  text = text.replace(/(\d)\s*(fhd|fullhd|full hd|uhd|hd|sd|4k|8k)\b/gi, "$1 ");
+  text = text.replace(/([a-zåäö])\s*(fhd|fullhd|full hd|uhd|hd|sd|4k|8k)\b/gi, "$1 ");
+
+  text = text.replace(/([a-zåäö])(\d)/gi, "$1 $2");
+  text = text.replace(/(\d)([a-zåäö])/gi, "$1 $2");
+
+  text = text.replace(
+    /\b(fhd|fullhd|full hd|hd|uhd|4k|8k|sd|hevc|h265|h\.265|x265|x264|mpeg|1080p|720p|2160p|50fps|60fps)\b/gi,
+    " "
+  );
+
+  text = text.replace(
+    /\b(multi audio|multi-audio|multiaudio|dual audio|audio|subtitles|subtitle|subs)\b/gi,
+    " "
+  );
+
+  text = text.replace(
+    /\b(sweden|sverige|swedish|svensk|nordic|scandinavia|scandinavian|se|dk|no|fi)\b/gi,
+    " "
+  );
+
+  text = text.replace(
+    /\b(live|backup|alt|raw|custom|vip|test|new|old|copy)\b/gi,
+    " "
+  );
+
+  text = text.replace(/[|•_\-–—]+/g, " ");
+  text = text.replace(/[^\p{L}\p{N}&+ ]+/gu, " ");
+
+  text = text.replace(/\s+/g, " ").trim();
+
+  return text;
+}
+
 function getAttribute(line: string, attribute: string): string {
   const match = line.match(new RegExp(`${attribute}="([^"]*)"`, "i"));
   return match?.[1]?.trim() || "";
@@ -148,6 +230,376 @@ function parseM3U(text: string): Channel[] {
   }
 
   return channels;
+}
+
+function parseEpgChannelBlock(block: string): EpgChannel | null {
+  const idMatch = block.match(/<channel\b[^>]*\bid\s*=\s*"([^"]*)"/i);
+  const id = decodeXmlEntities(idMatch?.[1]?.trim() || "");
+
+  const names = Array.from(
+    block.matchAll(/<display-name\b[^>]*>([\s\S]*?)<\/display-name>/gi)
+  )
+    .map((match) => decodeXmlEntities(match[1].replace(/<[^>]+>/g, "").trim()))
+    .filter(Boolean);
+
+  if (!id && names.length === 0) {
+    return null;
+  }
+
+  return {
+    id,
+    names,
+  };
+}
+
+async function readEpgChannelsFromFile(
+  file: File,
+  onProgress: (message: string) => void
+): Promise<EpgChannel[]> {
+  const isGzip = file.name.toLowerCase().endsWith(".gz");
+  const canDecompress = typeof DecompressionStream !== "undefined" && isGzip;
+
+  if (isGzip && !canDecompress) {
+    throw new Error(
+      "This browser does not support built-in .gz decompression. Try Edge/Chrome updated version, or extract the .xml.gz manually."
+    );
+  }
+
+  const rawStream = file.stream();
+  const stream = isGzip
+    ? rawStream.pipeThrough(new DecompressionStream("gzip"))
+    : rawStream;
+
+  const reader = stream.getReader();
+  const decoder = new TextDecoder("utf-8");
+
+  const epgChannels: EpgChannel[] = [];
+  const seenIds = new Set<string>();
+  let buffer = "";
+  let stoppedAtProgramme = false;
+
+  while (true) {
+    const { value, done } = await reader.read();
+
+    if (done) {
+      buffer += decoder.decode();
+      break;
+    }
+
+    buffer += decoder.decode(value, { stream: true });
+
+    const programmeIndex = buffer.search(/<programme\b/i);
+
+    if (programmeIndex >= 0) {
+      buffer = buffer.slice(0, programmeIndex);
+      stoppedAtProgramme = true;
+    }
+
+    while (true) {
+      const startIndex = buffer.search(/<channel\b/i);
+
+      if (startIndex < 0) {
+        if (buffer.length > 200000) {
+          buffer = buffer.slice(-50000);
+        }
+        break;
+      }
+
+      const endMatch = buffer.slice(startIndex).match(/<\/channel>/i);
+
+      if (!endMatch || endMatch.index === undefined) {
+        buffer = buffer.slice(startIndex);
+        break;
+      }
+
+      const endIndex = startIndex + endMatch.index + endMatch[0].length;
+      const block = buffer.slice(startIndex, endIndex);
+      const epgChannel = parseEpgChannelBlock(block);
+
+      if (epgChannel) {
+        const uniqueKey =
+          epgChannel.id || `${epgChannel.names.join("|")}-${epgChannels.length}`;
+
+        if (!seenIds.has(uniqueKey)) {
+          seenIds.add(uniqueKey);
+          epgChannels.push(epgChannel);
+        }
+      }
+
+      buffer = buffer.slice(endIndex);
+    }
+
+    if (epgChannels.length % 500 === 0 && epgChannels.length > 0) {
+      onProgress(
+        `Importing EPG... ${epgChannels.length.toLocaleString()} channels found`
+      );
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+
+    if (stoppedAtProgramme) {
+      break;
+    }
+  }
+
+  while (true) {
+    const startIndex = buffer.search(/<channel\b/i);
+
+    if (startIndex < 0) {
+      break;
+    }
+
+    const endMatch = buffer.slice(startIndex).match(/<\/channel>/i);
+
+    if (!endMatch || endMatch.index === undefined) {
+      break;
+    }
+
+    const endIndex = startIndex + endMatch.index + endMatch[0].length;
+    const block = buffer.slice(startIndex, endIndex);
+    const epgChannel = parseEpgChannelBlock(block);
+
+    if (epgChannel) {
+      const uniqueKey =
+        epgChannel.id || `${epgChannel.names.join("|")}-${epgChannels.length}`;
+
+      if (!seenIds.has(uniqueKey)) {
+        seenIds.add(uniqueKey);
+        epgChannels.push(epgChannel);
+      }
+    }
+
+    buffer = buffer.slice(endIndex);
+  }
+
+  return epgChannels;
+}
+
+function buildEpgIndexes(epgChannels: EpgChannel[]): EpgIndexes {
+  const byId = new Map<string, EpgChannel>();
+  const byExactName = new Map<string, EpgChannel[]>();
+  const byCleanName = new Map<string, EpgChannel[]>();
+
+  for (const epgChannel of epgChannels) {
+    if (epgChannel.id) {
+      byId.set(normalizeText(epgChannel.id), epgChannel);
+
+      const cleanId = cleanNameForEpg(epgChannel.id);
+
+      if (cleanId) {
+        if (!byCleanName.has(cleanId)) {
+          byCleanName.set(cleanId, []);
+        }
+
+        byCleanName.get(cleanId)?.push(epgChannel);
+      }
+    }
+
+    for (const name of epgChannel.names) {
+      const exactKey = normalizeText(name);
+      const cleanKey = cleanNameForEpg(name);
+
+      if (exactKey) {
+        if (!byExactName.has(exactKey)) {
+          byExactName.set(exactKey, []);
+        }
+
+        byExactName.get(exactKey)?.push(epgChannel);
+      }
+
+      if (cleanKey) {
+        if (!byCleanName.has(cleanKey)) {
+          byCleanName.set(cleanKey, []);
+        }
+
+        byCleanName.get(cleanKey)?.push(epgChannel);
+      }
+    }
+  }
+
+  return {
+    byId,
+    byExactName,
+    byCleanName,
+  };
+}
+
+function findSmartEpgNameMatch(
+  channelNames: string[],
+  epgIndexes: EpgIndexes
+): EpgChannel | null {
+  const cleanedChannelNames = channelNames
+    .map(cleanNameForEpg)
+    .filter((name) => name.length >= 2);
+
+  for (const cleanedName of cleanedChannelNames) {
+    const directMatches = epgIndexes.byCleanName.get(cleanedName);
+
+    if (directMatches && directMatches.length > 0) {
+      return directMatches[0];
+    }
+  }
+
+  for (const cleanedName of cleanedChannelNames) {
+    for (const [epgCleanName, matches] of epgIndexes.byCleanName.entries()) {
+      if (!epgCleanName || matches.length === 0) {
+        continue;
+      }
+
+      if (epgCleanName.length < 3 || cleanedName.length < 3) {
+        continue;
+      }
+
+      if (
+        cleanedName === epgCleanName ||
+        cleanedName.includes(epgCleanName) ||
+        epgCleanName.includes(cleanedName)
+      ) {
+        return matches[0];
+      }
+    }
+  }
+
+  for (const cleanedName of cleanedChannelNames) {
+    const channelTokens = cleanedName
+      .split(" ")
+      .filter((token) => token.length >= 2);
+
+    if (channelTokens.length === 0) {
+      continue;
+    }
+
+    for (const [epgCleanName, matches] of epgIndexes.byCleanName.entries()) {
+      const epgTokens = epgCleanName
+        .split(" ")
+        .filter((token) => token.length >= 2);
+
+      if (epgTokens.length === 0 || matches.length === 0) {
+        continue;
+      }
+
+      const commonTokens = channelTokens.filter((token) =>
+        epgTokens.includes(token)
+      );
+
+      const requiredMatches = Math.min(channelTokens.length, epgTokens.length);
+
+      if (commonTokens.length >= requiredMatches && commonTokens.length >= 1) {
+        return matches[0];
+      }
+    }
+  }
+
+  return null;
+}
+
+function getEpgMatchForChannel(
+  channel: Channel,
+  epgChannels: EpgChannel[],
+  epgIndexes: EpgIndexes,
+  epgTargetGroup: string
+): EpgMatch {
+  if (epgChannels.length === 0) {
+    return {
+      status: "no-epg",
+      epgChannel: null,
+    };
+  }
+
+  if (epgTargetGroup !== "All Channels" && channel.group !== epgTargetGroup) {
+    return {
+      status: "not-target-group",
+      epgChannel: null,
+    };
+  }
+
+  const normalizedTvgId = normalizeText(channel.tvgId);
+
+  if (normalizedTvgId) {
+    const exactIdMatch = epgIndexes.byId.get(normalizedTvgId);
+
+    if (exactIdMatch) {
+      return {
+        status: "matched-id",
+        epgChannel: exactIdMatch,
+      };
+    }
+  }
+
+  const possibleNames = [channel.tvgName, channel.name].filter(Boolean);
+
+  for (const name of possibleNames) {
+    const exactMatches = epgIndexes.byExactName.get(normalizeText(name));
+
+    if (exactMatches && exactMatches.length > 0) {
+      return {
+        status: "matched-name",
+        epgChannel: exactMatches[0],
+      };
+    }
+  }
+
+  const smartMatch = findSmartEpgNameMatch(possibleNames, epgIndexes);
+
+  if (smartMatch) {
+    return {
+      status: "matched-name",
+      epgChannel: smartMatch,
+    };
+  }
+
+  if (normalizedTvgId) {
+    return {
+      status: "missing-id",
+      epgChannel: null,
+    };
+  }
+
+  return {
+    status: "empty-id",
+    epgChannel: null,
+  };
+}
+
+function calculateEpgStatsForTarget(
+  channels: Channel[],
+  epgChannels: EpgChannel[],
+  epgTargetGroup: string
+) {
+  const indexes = buildEpgIndexes(epgChannels);
+
+  let targetChannels = 0;
+  let matched = 0;
+  let possible = 0;
+  let missing = 0;
+  let empty = 0;
+
+  for (const channel of channels) {
+    if (epgTargetGroup !== "All Channels" && channel.group !== epgTargetGroup) {
+      continue;
+    }
+
+    targetChannels++;
+
+    const match = getEpgMatchForChannel(
+      channel,
+      epgChannels,
+      indexes,
+      epgTargetGroup
+    );
+
+    if (match.status === "matched-id") matched++;
+    if (match.status === "matched-name") possible++;
+    if (match.status === "missing-id") missing++;
+    if (match.status === "empty-id") empty++;
+  }
+
+  return {
+    targetChannels,
+    matched,
+    possible,
+    missing,
+    empty,
+  };
 }
 
 function setAttribute(line: string, attribute: string, value: string): string {
@@ -337,6 +789,7 @@ function reorderChannelsByGroupOrder(
 
 function moveSelectedGroupsToTop(order: string[], selected: string[]) {
   const selectedSet = new Set(selected);
+
   return [
     ...order.filter((group) => selectedSet.has(group)),
     ...order.filter((group) => !selectedSet.has(group)),
@@ -345,6 +798,7 @@ function moveSelectedGroupsToTop(order: string[], selected: string[]) {
 
 function moveSelectedGroupsToBottom(order: string[], selected: string[]) {
   const selectedSet = new Set(selected);
+
   return [
     ...order.filter((group) => !selectedSet.has(group)),
     ...order.filter((group) => selectedSet.has(group)),
@@ -416,10 +870,63 @@ function bulkRenameName(name: string, form: BulkRenameForm) {
   return nextName.trim() || name;
 }
 
+function getEpgBadgeStyle(match: EpgMatch) {
+  if (match.status === "matched-id") {
+    return {
+      text: "EPG",
+      background: "#dcfce7",
+      color: "#166534",
+      title: "EPG matched by tvg-id",
+    };
+  }
+
+  if (match.status === "matched-name") {
+    return {
+      text: "EPG?",
+      background: "#fef9c3",
+      color: "#854d0e",
+      title: "Possible EPG match by smart name matching",
+    };
+  }
+
+  if (match.status === "missing-id") {
+    return {
+      text: "NO EPG",
+      background: "#fee2e2",
+      color: "#991b1b",
+      title: "tvg-id was not found in EPG",
+    };
+  }
+
+  if (match.status === "empty-id") {
+    return {
+      text: "NO ID",
+      background: "#e5e7eb",
+      color: "#374151",
+      title: "No tvg-id found",
+    };
+  }
+
+  return {
+    text: "",
+    background: "transparent",
+    color: "transparent",
+    title: "",
+  };
+}
+
 export default function App() {
   const [channels, setChannels] = useState<Channel[]>([]);
   const [groupOrder, setGroupOrder] = useState<string[]>([]);
   const [fileName, setFileName] = useState("");
+  const [epgFileName, setEpgFileName] = useState("");
+  const [epgChannels, setEpgChannels] = useState<EpgChannel[]>([]);
+  const [epgImportStatus, setEpgImportStatus] = useState("");
+  const [epgTargetGroup, setEpgTargetGroup] = useState("All Channels");
+  const [pendingEpgFile, setPendingEpgFile] = useState<File | null>(null);
+  const [pendingEpgTargetGroup, setPendingEpgTargetGroup] =
+    useState("All Channels");
+  const [epgTargetModalOpen, setEpgTargetModalOpen] = useState(false);
   const [selectedGroup, setSelectedGroup] = useState("All Channels");
   const [selectedGroupNames, setSelectedGroupNames] = useState<string[]>([]);
   const [selectedChannelIds, setSelectedChannelIds] = useState<string[]>([]);
@@ -442,6 +949,8 @@ export default function App() {
     null
   );
   const [logoPreviewOpen, setLogoPreviewOpen] = useState(false);
+  const [epgModalOpen, setEpgModalOpen] = useState(false);
+  const [epgSearch, setEpgSearch] = useState("");
   const [deleteConfirm, setDeleteConfirm] = useState<DeleteConfirmState | null>(
     null
   );
@@ -475,6 +984,8 @@ export default function App() {
     return channels.find((channel) => channel.id === selectedChannelIds[0]) || null;
   }, [channels, selectedChannelIds]);
 
+  const selectedEpgChannel = selectedLogoChannel;
+
   const groupsFromChannels = useMemo(() => {
     const seen = new Set<string>();
     const result: string[] = [];
@@ -500,6 +1011,65 @@ export default function App() {
 
     return merged;
   }, [groupOrder, groupsFromChannels]);
+
+  const epgIndexes = useMemo(() => {
+    return buildEpgIndexes(epgChannels);
+  }, [epgChannels]);
+
+  const epgMatchMap = useMemo(() => {
+    const result = new Map<string, EpgMatch>();
+
+    for (const channel of channels) {
+      result.set(
+        channel.id,
+        getEpgMatchForChannel(channel, epgChannels, epgIndexes, epgTargetGroup)
+      );
+    }
+
+    return result;
+  }, [channels, epgChannels, epgIndexes, epgTargetGroup]);
+
+  const epgStats = useMemo(() => {
+    return calculateEpgStatsForTarget(channels, epgChannels, epgTargetGroup);
+  }, [channels, epgChannels, epgTargetGroup]);
+
+  const epgSearchResults = useMemo(() => {
+    const selected = selectedEpgChannel;
+    const search =
+      epgSearch.trim() ||
+      selected?.tvgName ||
+      selected?.name ||
+      selected?.tvgId ||
+      "";
+
+    const normalizedSearch = normalizeText(search);
+    const cleanedSearch = cleanNameForEpg(search);
+
+    if (!normalizedSearch && !cleanedSearch) {
+      return epgChannels.slice(0, 80);
+    }
+
+    return epgChannels
+      .filter((epgChannel) => {
+        const id = normalizeText(epgChannel.id);
+        const cleanId = cleanNameForEpg(epgChannel.id);
+
+        if (id.includes(normalizedSearch) || cleanId.includes(cleanedSearch)) {
+          return true;
+        }
+
+        return epgChannel.names.some((name) => {
+          const exactName = normalizeText(name);
+          const cleanName = cleanNameForEpg(name);
+
+          return (
+            exactName.includes(normalizedSearch) ||
+            cleanName.includes(cleanedSearch)
+          );
+        });
+      })
+      .slice(0, 80);
+  }, [epgChannels, epgSearch, selectedEpgChannel]);
 
   const groupCounts = useMemo(() => {
     const counts = new Map<string, number>();
@@ -643,17 +1213,88 @@ export default function App() {
       setGroupOrder(initialGroups);
       setFileName(file.name);
       setSelectedGroup("All Channels");
+      setEpgTargetGroup("All Channels");
+      setPendingEpgTargetGroup("All Channels");
       setSelectedGroupNames([]);
       setSelectedChannelIds([]);
       setSearchText("");
       setNewGroupName("");
       setLogoPreviewOpen(false);
+      setEpgModalOpen(false);
       setDeleteConfirm(null);
       setBulkRenameOpen(false);
       resetDragState();
     };
 
     reader.readAsText(file);
+  }
+
+  function chooseEpgFile(file: File) {
+    setPendingEpgFile(file);
+    setPendingEpgTargetGroup(selectedGroup || "All Channels");
+    setEpgTargetModalOpen(true);
+  }
+
+  async function importPendingEpgFile() {
+    if (!pendingEpgFile) {
+      return;
+    }
+
+    const file = pendingEpgFile;
+    const targetGroup = pendingEpgTargetGroup;
+
+    setEpgTargetModalOpen(false);
+    setPendingEpgFile(null);
+    setEpgTargetGroup(targetGroup);
+
+    try {
+      setEpgImportStatus("Preparing EPG import...");
+      setEpgChannels([]);
+      setEpgFileName("");
+
+      const parsedEpgChannels = await readEpgChannelsFromFile(file, (message) => {
+        setEpgImportStatus(message);
+      });
+
+      const stats = calculateEpgStatsForTarget(
+        channels,
+        parsedEpgChannels,
+        targetGroup
+      );
+
+      setEpgChannels(parsedEpgChannels);
+      setEpgFileName(file.name);
+      setEpgImportStatus("");
+
+      if (parsedEpgChannels.length === 0) {
+        window.alert("EPG imported, but no channels were found.");
+      } else {
+        window.alert(
+          `EPG imported successfully.\n\n` +
+            `${parsedEpgChannels.length.toLocaleString()} EPG channels found.\n\n` +
+            `Target group: ${targetGroup}\n` +
+            `M3U channels checked: ${stats.targetChannels.toLocaleString()}\n` +
+            `Matched by tvg-id: ${stats.matched.toLocaleString()}\n` +
+            `Possible smart name matches: ${stats.possible.toLocaleString()}\n` +
+            `Missing / unmatched: ${(stats.missing + stats.empty).toLocaleString()}`
+        );
+      }
+    } catch (error) {
+      setEpgImportStatus("");
+
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Could not import EPG XML/XML.GZ file.";
+
+      window.alert(message);
+    }
+  }
+
+  function cancelPendingEpgImport() {
+    setPendingEpgFile(null);
+    setPendingEpgTargetGroup("All Channels");
+    setEpgTargetModalOpen(false);
   }
 
   function toggleChannel(channelId: string) {
@@ -761,6 +1402,10 @@ export default function App() {
       current.map((group) => (group === oldGroupName ? cleanNewName : group))
     );
 
+    if (epgTargetGroup === oldGroupName) {
+      setEpgTargetGroup(cleanNewName);
+    }
+
     setSelectedGroup(cleanNewName);
     setSelectedGroupNames([cleanNewName]);
     setRenameGroupOpen(false);
@@ -785,6 +1430,10 @@ export default function App() {
 
       if (groupNameSet.has(selectedGroup)) {
         setSelectedGroup("All Channels");
+      }
+
+      if (groupNameSet.has(epgTargetGroup)) {
+        setEpgTargetGroup("All Channels");
       }
     }
 
@@ -1109,6 +1758,60 @@ export default function App() {
     setLogoPreviewOpen(true);
   }
 
+  function openEpgModal() {
+    if (selectedChannelIds.length !== 1) {
+      window.alert("Select exactly one channel to edit EPG.");
+      return;
+    }
+
+    if (epgChannels.length === 0) {
+      window.alert("Import an EPG XML or XML.GZ file first.");
+      return;
+    }
+
+    const selectedChannel = channels.find(
+      (channel) => channel.id === selectedChannelIds[0]
+    );
+
+    setEpgSearch(
+      selectedChannel?.tvgName ||
+        selectedChannel?.name ||
+        selectedChannel?.tvgId ||
+        ""
+    );
+
+    setEpgModalOpen(true);
+  }
+
+  function applyEpgChannelToSelected(epgChannel: EpgChannel) {
+    if (!selectedEpgChannel) {
+      return;
+    }
+
+    const bestName = epgChannel.names[0] || selectedEpgChannel.tvgName;
+
+    setChannels((current) =>
+      current.map((channel) => {
+        if (channel.id !== selectedEpgChannel.id) {
+          return channel;
+        }
+
+        const updatedChannel: Channel = {
+          ...channel,
+          tvgId: epgChannel.id,
+          tvgName: bestName,
+        };
+
+        return {
+          ...updatedChannel,
+          rawInfo: updateChannelRawInfo(updatedChannel),
+        };
+      })
+    );
+
+    setEpgModalOpen(false);
+  }
+
   function startDraggingChannel(channelId: string) {
     if (selectedChannelSet.has(channelId)) {
       setDraggedChannelIds(selectedChannelIds);
@@ -1198,8 +1901,10 @@ export default function App() {
     setChannelEditOpen(false);
     setChannelEditForm(null);
     setLogoPreviewOpen(false);
+    setEpgModalOpen(false);
     setDeleteConfirm(null);
     setBulkRenameOpen(false);
+    setEpgTargetModalOpen(false);
   }
 
   useEffect(() => {
@@ -1227,6 +1932,8 @@ export default function App() {
         renameGroupOpen ||
         channelEditOpen ||
         logoPreviewOpen ||
+        epgModalOpen ||
+        epgTargetModalOpen ||
         deleteConfirm ||
         bulkRenameOpen;
 
@@ -1256,6 +1963,8 @@ export default function App() {
     bulkRenameOpen,
     channelEditOpen,
     deleteConfirm,
+    epgModalOpen,
+    epgTargetModalOpen,
     groupPickerMode,
     logoPreviewOpen,
     renameGroupOpen,
@@ -1275,7 +1984,10 @@ export default function App() {
         </div>
 
         <div className="topActions">
-          <label className="importButton tooltipButton tooltipLeft" data-tooltip="Import M3U">
+          <label
+            className="importButton tooltipButton tooltipLeft"
+            data-tooltip="Import M3U"
+          >
             Import M3U
             <input
               type="file"
@@ -1322,7 +2034,12 @@ export default function App() {
           <section className="playlistStrip">
             <div>
               <strong>{fileName}</strong>
-              <span>{channels.length.toLocaleString()} total channels</span>
+              <span>
+                {channels.length.toLocaleString()} total channels
+                {epgChannels.length > 0 &&
+                  ` • EPG target: ${epgTargetGroup} • ${epgStats.matched.toLocaleString()} exact • ${epgStats.possible.toLocaleString()} possible`}
+                {epgImportStatus && ` • ${epgImportStatus}`}
+              </span>
             </div>
 
             <div className="stripTools">
@@ -1594,10 +2311,35 @@ export default function App() {
                     </button>
                   )}
 
+                  <label
+                    className="textActionButton tooltipButton"
+                    data-tooltip="Import EPG XML or XML.GZ"
+                    style={{
+                      display: "grid",
+                      placeItems: "center",
+                      minHeight: 34,
+                      cursor: "pointer",
+                    }}
+                  >
+                    {epgImportStatus ? "Importing..." : "Import EPG"}
+                    <input
+                      type="file"
+                      accept=".xml,.xmltv,.txt,.gz,.xml.gz"
+                      style={{ display: "none" }}
+                      disabled={Boolean(epgImportStatus)}
+                      onChange={(event) => {
+                        const file = event.target.files?.[0];
+                        if (file) chooseEpgFile(file);
+                        event.target.value = "";
+                      }}
+                    />
+                  </label>
+
                   <button
                     className="iconButton tooltipButton"
                     data-tooltip="EPG"
-                    disabled
+                    disabled={selectedChannelIds.length !== 1}
+                    onClick={openEpgModal}
                   >
                     EPG
                   </button>
@@ -1834,6 +2576,11 @@ export default function App() {
                 {visibleChannels.map((channel) => {
                   const isSelected = selectedChannelSet.has(channel.id);
                   const isDragging = draggedChannelIds.includes(channel.id);
+                  const epgMatch = epgMatchMap.get(channel.id) || {
+                    status: "no-epg",
+                    epgChannel: null,
+                  };
+                  const epgBadge = getEpgBadgeStyle(epgMatch);
 
                   return (
                     <div
@@ -1910,6 +2657,26 @@ export default function App() {
                           size={24}
                         />
                         <span>{channel.name}</span>
+
+                        {epgChannels.length > 0 &&
+                          epgMatch.status !== "not-target-group" && (
+                            <span
+                              title={epgBadge.title}
+                              style={{
+                                background: epgBadge.background,
+                                color: epgBadge.color,
+                                borderRadius: 999,
+                                padding: "2px 7px",
+                                fontSize: 10,
+                                fontWeight: 800,
+                                fontStyle: "normal",
+                                whiteSpace: "nowrap",
+                                flex: "0 0 auto",
+                              }}
+                            >
+                              {epgBadge.text}
+                            </span>
+                          )}
                       </div>
 
                       <span className="groupCell">{channel.group}</span>
@@ -1931,6 +2698,230 @@ export default function App() {
               </div>
             </section>
           </section>
+
+          {epgTargetModalOpen && pendingEpgFile && (
+            <div className="modalBackdrop" onClick={cancelPendingEpgImport}>
+              <div
+                className="smallModal"
+                onClick={(event) => event.stopPropagation()}
+                style={{ width: 520 }}
+              >
+                <h2>Import EPG</h2>
+
+                <p style={{ color: "#6b7280", marginTop: 6 }}>
+                  Choose which group this EPG should match against.
+                </p>
+
+                <div
+                  style={{
+                    border: "1px solid #e5e7eb",
+                    borderRadius: 12,
+                    padding: 14,
+                    background: "#f9fafb",
+                    marginTop: 14,
+                    marginBottom: 14,
+                  }}
+                >
+                  <strong>File</strong>
+                  <div
+                    style={{
+                      color: "#374151",
+                      marginTop: 6,
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {pendingEpgFile.name}
+                  </div>
+                </div>
+
+                <label style={{ display: "grid", gap: 8 }}>
+                  Group to match
+                  <select
+                    autoFocus
+                    value={pendingEpgTargetGroup}
+                    onChange={(event) =>
+                      setPendingEpgTargetGroup(event.target.value)
+                    }
+                    style={{
+                      height: 44,
+                      border: "1px solid #d1d5db",
+                      borderRadius: 10,
+                      padding: "0 12px",
+                      fontSize: 16,
+                    }}
+                  >
+                    <option value="All Channels">All Channels</option>
+                    {groups.map((group) => (
+                      <option key={group} value={group}>
+                        {group}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <div
+                  style={{
+                    color: "#6b7280",
+                    fontSize: 13,
+                    marginTop: 12,
+                    lineHeight: 1.5,
+                  }}
+                >
+                  Choosing a specific group makes matching cleaner and avoids
+                  checking unrelated channels.
+                </div>
+
+                <div className="modalFooter">
+                  <button onClick={cancelPendingEpgImport}>Cancel</button>
+                  <button
+                    className="confirmButton"
+                    onClick={importPendingEpgFile}
+                  >
+                    Import EPG
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {epgModalOpen && selectedEpgChannel && (
+            <div className="modalBackdrop" onClick={closeModals}>
+              <div
+                className="channelEditModal"
+                onClick={(event) => event.stopPropagation()}
+                style={{ width: 720 }}
+              >
+                <div className="modalTitle">
+                  <span>EPG</span>
+                  <h2>EPG Mapping</h2>
+                  <em>{epgChannels.length.toLocaleString()} EPG channels</em>
+                </div>
+
+                <div className="editForm">
+                  <div
+                    style={{
+                      border: "1px solid #e5e7eb",
+                      borderRadius: 12,
+                      padding: 16,
+                      background: "#f9fafb",
+                    }}
+                  >
+                    <strong>{selectedEpgChannel.name}</strong>
+
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "120px 1fr",
+                        gap: 8,
+                        marginTop: 12,
+                        color: "#374151",
+                      }}
+                    >
+                      <span>Cleaned name</span>
+                      <code>{cleanNameForEpg(selectedEpgChannel.name)}</code>
+
+                      <span>Current tvg-id</span>
+                      <code>{selectedEpgChannel.tvgId || "Empty"}</code>
+
+                      <span>Current tvg-name</span>
+                      <code>{selectedEpgChannel.tvgName || "Empty"}</code>
+
+                      <span>Group</span>
+                      <code>{selectedEpgChannel.group}</code>
+                    </div>
+                  </div>
+
+                  <label>
+                    Search EPG channels
+                    <input
+                      autoFocus
+                      value={epgSearch}
+                      onChange={(event) => setEpgSearch(event.target.value)}
+                      placeholder="Search by EPG id or display name..."
+                    />
+                  </label>
+
+                  <div
+                    style={{
+                      border: "1px solid #e5e7eb",
+                      borderRadius: 12,
+                      overflow: "hidden",
+                      maxHeight: 340,
+                      overflowY: "auto",
+                    }}
+                  >
+                    {epgSearchResults.map((epgChannel) => (
+                      <button
+                        key={`${epgChannel.id}-${epgChannel.names.join("|")}`}
+                        onClick={() => applyEpgChannelToSelected(epgChannel)}
+                        style={{
+                          width: "100%",
+                          border: 0,
+                          borderBottom: "1px solid #e5e7eb",
+                          background: "white",
+                          textAlign: "left",
+                          padding: "12px 14px",
+                          display: "grid",
+                          gridTemplateColumns: "1fr auto",
+                          gap: 12,
+                          alignItems: "center",
+                        }}
+                      >
+                        <div style={{ minWidth: 0 }}>
+                          <strong>
+                            {epgChannel.names[0] || epgChannel.id || "Unnamed EPG"}
+                          </strong>
+                          <div
+                            style={{
+                              color: "#6b7280",
+                              fontSize: 12,
+                              marginTop: 4,
+                              whiteSpace: "nowrap",
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                            }}
+                          >
+                            {epgChannel.names.slice(1).join(" • ") ||
+                              "No extra names"}
+                          </div>
+                        </div>
+
+                        <code
+                          style={{
+                            color: "#4338ca",
+                            background: "#eef2ff",
+                            borderRadius: 999,
+                            padding: "4px 8px",
+                            fontSize: 12,
+                          }}
+                        >
+                          {epgChannel.id || "No ID"}
+                        </code>
+                      </button>
+                    ))}
+
+                    {epgSearchResults.length === 0 && (
+                      <div
+                        style={{
+                          padding: 18,
+                          color: "#6b7280",
+                          textAlign: "center",
+                        }}
+                      >
+                        No EPG channels found.
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="modalFooter">
+                  <button onClick={closeModals}>Cancel</button>
+                </div>
+              </div>
+            </div>
+          )}
 
           {bulkRenameOpen && (
             <div className="modalBackdrop" onClick={closeModals}>
@@ -1967,7 +2958,13 @@ export default function App() {
                       Add fixed text to the beginning or end of every name.
                     </div>
 
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "1fr 1fr",
+                        gap: 12,
+                      }}
+                    >
                       <label>
                         Prefix
                         <input
@@ -2017,7 +3014,13 @@ export default function App() {
                       Search text in the channel name and replace it.
                     </div>
 
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "1fr 1fr",
+                        gap: 12,
+                      }}
+                    >
                       <label>
                         Find
                         <input
@@ -2313,6 +3316,40 @@ export default function App() {
                       }
                     />
                   </label>
+
+                  <div
+                    style={{
+                      border: "1px solid #e5e7eb",
+                      borderRadius: 12,
+                      padding: 14,
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 14,
+                      background: "#f9fafb",
+                    }}
+                  >
+                    <ChannelLogo
+                      logo={channelEditForm.tvgLogo}
+                      name={channelEditForm.name}
+                      size={64}
+                    />
+                    <div style={{ minWidth: 0 }}>
+                      <strong>Logo preview</strong>
+                      <div
+                        style={{
+                          color: "#6b7280",
+                          fontSize: 12,
+                          marginTop: 4,
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                          maxWidth: 460,
+                        }}
+                      >
+                        {channelEditForm.tvgLogo || "No logo URL"}
+                      </div>
+                    </div>
+                  </div>
                 </div>
 
                 <div className="modalFooter">
