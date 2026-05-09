@@ -88,6 +88,8 @@ export default function App() {
   const [selectedChannelIds, setSelectedChannelIds] = useState<string[]>([]);
   const [searchText, setSearchText] = useState("");
   const [newGroupName, setNewGroupName] = useState("");
+  const [draggedChannelIds, setDraggedChannelIds] = useState<string[]>([]);
+  const [dragOverGroup, setDragOverGroup] = useState("");
 
   const groups = useMemo(() => {
     return Array.from(new Set(channels.map((channel) => channel.group))).sort(
@@ -129,6 +131,8 @@ export default function App() {
       setSelectedChannelIds([]);
       setSearchText("");
       setNewGroupName("");
+      setDraggedChannelIds([]);
+      setDragOverGroup("");
     };
 
     reader.readAsText(file);
@@ -164,16 +168,16 @@ export default function App() {
     setSelectedChannelIds([]);
   }
 
-  function moveSelectedToGroup(groupName: string) {
+  function moveChannelsToGroup(channelIds: string[], groupName: string) {
     const cleanGroupName = groupName.trim();
 
-    if (!cleanGroupName || selectedChannelIds.length === 0) {
+    if (!cleanGroupName || channelIds.length === 0) {
       return;
     }
 
     setChannels((current) =>
       current.map((channel) =>
-        selectedChannelIds.includes(channel.id)
+        channelIds.includes(channel.id)
           ? {
               ...channel,
               group: cleanGroupName,
@@ -186,10 +190,45 @@ export default function App() {
     setSelectedGroup(cleanGroupName);
     setSelectedChannelIds([]);
     setNewGroupName("");
+    setDraggedChannelIds([]);
+    setDragOverGroup("");
+  }
+
+  function moveSelectedToGroup(groupName: string) {
+    moveChannelsToGroup(selectedChannelIds, groupName);
   }
 
   function createNewGroupAndMove() {
     moveSelectedToGroup(newGroupName);
+  }
+
+  function startDraggingChannel(channelId: string) {
+    if (selectedChannelIds.includes(channelId)) {
+      setDraggedChannelIds(selectedChannelIds);
+      return;
+    }
+
+    setDraggedChannelIds([channelId]);
+  }
+
+  function dropChannelsOnGroup(groupName: string) {
+    if (draggedChannelIds.length === 0) {
+      return;
+    }
+
+    moveChannelsToGroup(draggedChannelIds, groupName);
+  }
+
+  function getDragText() {
+    if (draggedChannelIds.length === 0) {
+      return "";
+    }
+
+    if (draggedChannelIds.length === 1) {
+      return "Drop to move 1 channel";
+    }
+
+    return `Drop to move ${draggedChannelIds.length.toLocaleString()} channels`;
   }
 
   return (
@@ -240,7 +279,9 @@ export default function App() {
 
             <button
               className={
-                selectedGroup === "All Channels" ? "groupButton active" : "groupButton"
+                selectedGroup === "All Channels"
+                  ? "groupButton active"
+                  : "groupButton"
               }
               onClick={() => setSelectedGroup("All Channels")}
             >
@@ -248,22 +289,45 @@ export default function App() {
               <strong>{channels.length.toLocaleString()}</strong>
             </button>
 
+            <div className="dragHint">
+              Tip: drag selected channels onto a group.
+            </div>
+
             <div className="groupList">
               {groups.map((group) => {
                 const count = channels.filter(
                   (channel) => channel.group === group
                 ).length;
 
+                const className = [
+                  "groupButton",
+                  selectedGroup === group ? "active" : "",
+                  dragOverGroup === group ? "dragOver" : "",
+                ]
+                  .filter(Boolean)
+                  .join(" ");
+
                 return (
                   <button
                     key={group}
-                    className={
-                      selectedGroup === group ? "groupButton active" : "groupButton"
-                    }
+                    className={className}
                     onClick={() => setSelectedGroup(group)}
+                    onDragOver={(event) => {
+                      event.preventDefault();
+                      setDragOverGroup(group);
+                    }}
+                    onDragLeave={() => setDragOverGroup("")}
+                    onDrop={(event) => {
+                      event.preventDefault();
+                      dropChannelsOnGroup(group);
+                    }}
                   >
                     <span>{group}</span>
                     <strong>{count.toLocaleString()}</strong>
+
+                    {dragOverGroup === group && draggedChannelIds.length > 0 && (
+                      <em>{getDragText()}</em>
+                    )}
                   </button>
                 );
               })}
@@ -334,21 +398,38 @@ export default function App() {
             </div>
 
             <div className="channelList">
-              {filteredChannels.slice(0, 500).map((channel) => (
-                <label key={channel.id} className="channelRow">
-                  <input
-                    type="checkbox"
-                    checked={selectedChannelIds.includes(channel.id)}
-                    onChange={() => toggleChannel(channel.id)}
-                  />
+              {filteredChannels.slice(0, 500).map((channel) => {
+                const isSelected = selectedChannelIds.includes(channel.id);
 
-                  <div className="channelDetails">
-                    <strong>{channel.name}</strong>
-                    <span>{channel.group}</span>
-                    <small>{channel.url}</small>
-                  </div>
-                </label>
-              ))}
+                return (
+                  <label
+                    key={channel.id}
+                    className={isSelected ? "channelRow selected" : "channelRow"}
+                    draggable
+                    onDragStart={(event) => {
+                      startDraggingChannel(channel.id);
+                      event.dataTransfer.effectAllowed = "move";
+                      event.dataTransfer.setData("text/plain", channel.id);
+                    }}
+                    onDragEnd={() => {
+                      setDraggedChannelIds([]);
+                      setDragOverGroup("");
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={isSelected}
+                      onChange={() => toggleChannel(channel.id)}
+                    />
+
+                    <div className="channelDetails">
+                      <strong>{channel.name}</strong>
+                      <span>{channel.group}</span>
+                      <small>{channel.url}</small>
+                    </div>
+                  </label>
+                );
+              })}
 
               {filteredChannels.length > 500 && (
                 <div className="limitNotice">

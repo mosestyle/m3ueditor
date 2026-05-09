@@ -142,10 +142,20 @@ select:disabled {
   color: #94a3b8;
 }
 
+.dragHint {
+  color: #94a3b8;
+  background: #0f172a;
+  border: 1px dashed #475569;
+  border-radius: 12px;
+  padding: 10px;
+  margin: 8px 0;
+  font-size: 13px;
+}
+
 .groupList {
   display: grid;
   gap: 8px;
-  max-height: calc(100vh - 150px);
+  max-height: calc(100vh - 195px);
   overflow: auto;
   padding-right: 4px;
 }
@@ -171,6 +181,12 @@ select:disabled {
   border-color: #3b82f6;
 }
 
+.groupButton.dragOver {
+  background: #16a34a;
+  border-color: #22c55e;
+  transform: scale(1.02);
+}
+
 .groupButton span {
   overflow: hidden;
   white-space: nowrap;
@@ -180,6 +196,13 @@ select:disabled {
 .groupButton strong {
   color: #cbd5e1;
   font-size: 13px;
+}
+
+.groupButton em {
+  grid-column: 1 / -1;
+  color: #dcfce7;
+  font-style: normal;
+  font-size: 12px;
 }
 
 .toolbar {
@@ -243,10 +266,20 @@ select:disabled {
   border: 1px solid #334155;
   border-radius: 12px;
   padding: 12px;
+  user-select: none;
 }
 
 .channelRow:hover {
   border-color: #3b82f6;
+}
+
+.channelRow.selected {
+  border-color: #38bdf8;
+  background: #10233d;
+}
+
+.channelRow:active {
+  cursor: grabbing;
 }
 
 .channelRow input {
