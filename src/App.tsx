@@ -1,122 +1,369 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
-import heroImg from './assets/hero.png'
-import './App.css'
+import { useMemo, useState } from "react";
+import "./App.css";
 
-function App() {
-  const [count, setCount] = useState(0)
+type Channel = {
+  id: string;
+  name: string;
+  group: string;
+  url: string;
+  rawInfo: string;
+};
 
-  return (
-    <>
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
-        </div>
-        <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.tsx</code> and save to test <code>HMR</code>
-          </p>
-        </div>
-        <button
-          type="button"
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
-        >
-          Count is {count}
-        </button>
-      </section>
+function parseM3U(text: string): Channel[] {
+  const lines = text.split(/\r?\n/);
+  const channels: Channel[] = [];
 
-      <div className="ticks"></div>
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
 
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
-        </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
+    if (line.startsWith("#EXTINF")) {
+      const url = lines[i + 1]?.trim() || "";
 
-      <div className="ticks"></div>
-      <section id="spacer"></section>
-    </>
-  )
+      const lastCommaIndex = line.lastIndexOf(",");
+      const channelName =
+        lastCommaIndex >= 0
+          ? line.substring(lastCommaIndex + 1).trim()
+          : "Unnamed channel";
+
+      const groupMatch = line.match(/group-title="([^"]*)"/i);
+
+      channels.push({
+        id: crypto.randomUUID(),
+        name: channelName,
+        group: groupMatch?.[1]?.trim() || "No Group",
+        url,
+        rawInfo: line,
+      });
+    }
+  }
+
+  return channels;
 }
 
-export default App
+function updateGroupInRawInfo(rawInfo: string, newGroup: string): string {
+  if (rawInfo.match(/group-title="[^"]*"/i)) {
+    return rawInfo.replace(/group-title="[^"]*"/i, `group-title="${newGroup}"`);
+  }
+
+  const commaIndex = rawInfo.lastIndexOf(",");
+
+  if (commaIndex >= 0) {
+    return (
+      rawInfo.slice(0, commaIndex) +
+      ` group-title="${newGroup}"` +
+      rawInfo.slice(commaIndex)
+    );
+  }
+
+  return `${rawInfo} group-title="${newGroup}"`;
+}
+
+function exportM3U(channels: Channel[], originalFileName: string) {
+  let output = "#EXTM3U\n";
+
+  for (const channel of channels) {
+    const updatedInfo = updateGroupInRawInfo(channel.rawInfo, channel.group);
+    output += `${updatedInfo}\n${channel.url}\n`;
+  }
+
+  const blob = new Blob([output], { type: "audio/x-mpegurl;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+
+  const cleanName = originalFileName
+    ? originalFileName.replace(/\.(m3u8?|txt)$/i, "")
+    : "playlist";
+
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `${cleanName}-edited.m3u`;
+  link.click();
+
+  URL.revokeObjectURL(url);
+}
+
+export default function App() {
+  const [channels, setChannels] = useState<Channel[]>([]);
+  const [fileName, setFileName] = useState("");
+  const [selectedGroup, setSelectedGroup] = useState("All Channels");
+  const [selectedChannelIds, setSelectedChannelIds] = useState<string[]>([]);
+  const [searchText, setSearchText] = useState("");
+  const [newGroupName, setNewGroupName] = useState("");
+
+  const groups = useMemo(() => {
+    return Array.from(new Set(channels.map((channel) => channel.group))).sort(
+      (a, b) => a.localeCompare(b)
+    );
+  }, [channels]);
+
+  const filteredChannels = useMemo(() => {
+    const search = searchText.trim().toLowerCase();
+
+    return channels.filter((channel) => {
+      const matchesGroup =
+        selectedGroup === "All Channels" || channel.group === selectedGroup;
+
+      const matchesSearch =
+        !search ||
+        channel.name.toLowerCase().includes(search) ||
+        channel.group.toLowerCase().includes(search) ||
+        channel.url.toLowerCase().includes(search);
+
+      return matchesGroup && matchesSearch;
+    });
+  }, [channels, selectedGroup, searchText]);
+
+  const allVisibleSelected =
+    filteredChannels.length > 0 &&
+    filteredChannels.every((channel) => selectedChannelIds.includes(channel.id));
+
+  function handleFile(file: File) {
+    const reader = new FileReader();
+
+    reader.onload = () => {
+      const text = String(reader.result || "");
+      const parsedChannels = parseM3U(text);
+
+      setChannels(parsedChannels);
+      setFileName(file.name);
+      setSelectedGroup("All Channels");
+      setSelectedChannelIds([]);
+      setSearchText("");
+      setNewGroupName("");
+    };
+
+    reader.readAsText(file);
+  }
+
+  function toggleChannel(channelId: string) {
+    setSelectedChannelIds((current) => {
+      if (current.includes(channelId)) {
+        return current.filter((id) => id !== channelId);
+      }
+
+      return [...current, channelId];
+    });
+  }
+
+  function toggleAllVisible() {
+    const visibleIds = filteredChannels.map((channel) => channel.id);
+
+    if (allVisibleSelected) {
+      setSelectedChannelIds((current) =>
+        current.filter((id) => !visibleIds.includes(id))
+      );
+      return;
+    }
+
+    setSelectedChannelIds((current) => {
+      const merged = new Set([...current, ...visibleIds]);
+      return Array.from(merged);
+    });
+  }
+
+  function clearSelection() {
+    setSelectedChannelIds([]);
+  }
+
+  function moveSelectedToGroup(groupName: string) {
+    const cleanGroupName = groupName.trim();
+
+    if (!cleanGroupName || selectedChannelIds.length === 0) {
+      return;
+    }
+
+    setChannels((current) =>
+      current.map((channel) =>
+        selectedChannelIds.includes(channel.id)
+          ? {
+              ...channel,
+              group: cleanGroupName,
+              rawInfo: updateGroupInRawInfo(channel.rawInfo, cleanGroupName),
+            }
+          : channel
+      )
+    );
+
+    setSelectedGroup(cleanGroupName);
+    setSelectedChannelIds([]);
+    setNewGroupName("");
+  }
+
+  function createNewGroupAndMove() {
+    moveSelectedToGroup(newGroupName);
+  }
+
+  return (
+    <main className="app">
+      <header className="header">
+        <div>
+          <h1>Moses M3U Editor</h1>
+          <p>Edit your M3U playlist locally in your browser.</p>
+        </div>
+      </header>
+
+      <section className="uploadBox">
+        <div>
+          <h2>Upload your M3U file</h2>
+          <p>Your file stays on your computer. Nothing is uploaded online.</p>
+        </div>
+
+        <input
+          type="file"
+          accept=".m3u,.m3u8,text/plain"
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            if (file) handleFile(file);
+          }}
+        />
+      </section>
+
+      {channels.length > 0 && (
+        <section className="playlistInfo">
+          <div>
+            <strong>{fileName}</strong>
+            <span>{channels.length.toLocaleString()} channels loaded</span>
+          </div>
+
+          <button onClick={() => exportM3U(channels, fileName)}>
+            Export edited M3U
+          </button>
+        </section>
+      )}
+
+      {channels.length > 0 && (
+        <section className="editorLayout">
+          <aside className="groupsPanel">
+            <div className="panelTitle">
+              <h2>Groups</h2>
+              <span>{groups.length}</span>
+            </div>
+
+            <button
+              className={
+                selectedGroup === "All Channels" ? "groupButton active" : "groupButton"
+              }
+              onClick={() => setSelectedGroup("All Channels")}
+            >
+              <span>All Channels</span>
+              <strong>{channels.length.toLocaleString()}</strong>
+            </button>
+
+            <div className="groupList">
+              {groups.map((group) => {
+                const count = channels.filter(
+                  (channel) => channel.group === group
+                ).length;
+
+                return (
+                  <button
+                    key={group}
+                    className={
+                      selectedGroup === group ? "groupButton active" : "groupButton"
+                    }
+                    onClick={() => setSelectedGroup(group)}
+                  >
+                    <span>{group}</span>
+                    <strong>{count.toLocaleString()}</strong>
+                  </button>
+                );
+              })}
+            </div>
+          </aside>
+
+          <section className="channelsPanel">
+            <div className="toolbar">
+              <div className="toolbarTop">
+                <div>
+                  <h2>{selectedGroup}</h2>
+                  <p>
+                    Showing {filteredChannels.length.toLocaleString()} channels
+                    {selectedChannelIds.length > 0 &&
+                      ` • ${selectedChannelIds.length.toLocaleString()} selected`}
+                  </p>
+                </div>
+
+                <button className="secondaryButton" onClick={clearSelection}>
+                  Clear selection
+                </button>
+              </div>
+
+              <div className="toolbarControls">
+                <input
+                  className="searchInput"
+                  value={searchText}
+                  onChange={(event) => setSearchText(event.target.value)}
+                  placeholder="Search channels, groups or URLs..."
+                />
+
+                <button onClick={toggleAllVisible}>
+                  {allVisibleSelected ? "Unselect visible" : "Select visible"}
+                </button>
+
+                <select
+                  value=""
+                  disabled={selectedChannelIds.length === 0}
+                  onChange={(event) => {
+                    const value = event.target.value;
+                    if (value) moveSelectedToGroup(value);
+                  }}
+                >
+                  <option value="">Move selected to...</option>
+                  {groups.map((group) => (
+                    <option key={group} value={group}>
+                      {group}
+                    </option>
+                  ))}
+                </select>
+
+                <input
+                  className="newGroupInput"
+                  value={newGroupName}
+                  onChange={(event) => setNewGroupName(event.target.value)}
+                  placeholder="New group name"
+                />
+
+                <button
+                  disabled={
+                    selectedChannelIds.length === 0 || !newGroupName.trim()
+                  }
+                  onClick={createNewGroupAndMove}
+                >
+                  Create group + move
+                </button>
+              </div>
+            </div>
+
+            <div className="channelList">
+              {filteredChannels.slice(0, 500).map((channel) => (
+                <label key={channel.id} className="channelRow">
+                  <input
+                    type="checkbox"
+                    checked={selectedChannelIds.includes(channel.id)}
+                    onChange={() => toggleChannel(channel.id)}
+                  />
+
+                  <div className="channelDetails">
+                    <strong>{channel.name}</strong>
+                    <span>{channel.group}</span>
+                    <small>{channel.url}</small>
+                  </div>
+                </label>
+              ))}
+
+              {filteredChannels.length > 500 && (
+                <div className="limitNotice">
+                  Showing first 500 results. Use search or group filters to narrow
+                  the list.
+                </div>
+              )}
+
+              {filteredChannels.length === 0 && (
+                <div className="emptyState">No channels found.</div>
+              )}
+            </div>
+          </section>
+        </section>
+      )}
+    </main>
+  );
+}
