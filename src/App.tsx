@@ -100,6 +100,96 @@ type LogoStatus = "ok" | "missing" | "broken";
 
 type LogoFilter = "all" | "has-logo" | "missing-logo" | "broken-logo";
 
+type BuiltInEpgCode = {
+  name: string;
+  code: string;
+};
+
+const SWEDISH_EPG_CODES: BuiltInEpgCode[] = [
+  { name: "Animal Planet", code: "AnimalPlanet.se" },
+  { name: "ATG Live", code: "ATGLive.se" },
+  { name: "Axess TV", code: "AxessTV.se" },
+  { name: "BBC Brit", code: "BBCBrit.se" },
+  { name: "Cartoon Network", code: "CartoonNetwork.se" },
+  { name: "Cartoonito", code: "Cartoonito.se" },
+  { name: "Discovery Channel", code: "DiscoveryChannel.se" },
+  { name: "Discovery Science", code: "DiscoveryScience.se" },
+  { name: "Disney Channel", code: "DisneyChannel.se" },
+  { name: "Eurosport 2", code: "Eurosport2.se" },
+  { name: "Eurosport HD", code: "Eurosport.se" },
+  { name: "Fight Sports", code: "FightSports.se" },
+  { name: "Godare", code: "Godare.se" },
+  { name: "H2HD", code: "HistoryChannel2.se" },
+  { name: "History HD", code: "HistoryChannel.se" },
+  { name: "Horse & Country TV", code: "HorseCountry.se" },
+  { name: "Investigation Discovery", code: "InvestigationDiscovery.se" },
+  { name: "Kanal 10", code: "Kanal10.se" },
+  { name: "Kanal 11 HD", code: "Kanal11.se" },
+  { name: "Kanal 5", code: "Kanal5.se" },
+  { name: "Kanal 9", code: "Kanal9.se" },
+  { name: "Kunskapskanalen", code: "Kunskapskanalen.se" },
+  { name: "Love Nature HD (T)", code: "LoveNature.se" },
+  { name: "Mezzo", code: "Mezzo.se" },
+  { name: "Moonbug (T)", code: "Moonbug.se" },
+  { name: "MTV", code: "MTV.se" },
+  { name: "Nat Geo Wild", code: "NatGeoWild.se" },
+  { name: "National Geographic", code: "NatGeo.se" },
+  { name: "National Geographic HD (svenska)", code: "NatGeoHD.se" },
+  { name: "Nick Jr", code: "NickJr.se" },
+  { name: "Nickelodeon", code: "Nickelodeon.se" },
+  { name: "Nicktoons", code: "Nicktoons.se" },
+  { name: "Out TV", code: "OutTV.se" },
+  { name: "Pink Plus", code: "PinkPlus.se" },
+  { name: "SF-kanalen", code: "SFKanalen.se" },
+  { name: "Sjuan", code: "Sjuan.se" },
+  { name: "SkyShowtime 1", code: "SkyShowtime1.se" },
+  { name: "SkyShowtime 2", code: "SkyShowtime2.se" },
+  { name: "Sportkanalen", code: "Sportkanalen.se" },
+  { name: "SVT 24", code: "svt24.se" },
+  { name: "SVT Barn", code: "SVTb.se" },
+  { name: "SVT1", code: "SVT1.se" },
+  { name: "SVT2", code: "SVT2.se" },
+  { name: "TLC", code: "TLCsverige.se" },
+  { name: "TLC Europe", code: "TLCEurope.se" },
+  { name: "Travel Channel", code: "TravelChannel.se" },
+  { name: "TV 12", code: "TV12.se" },
+  { name: "TV10", code: "TV10.se" },
+  { name: "TV3", code: "TV3.se" },
+  { name: "TV4", code: "TV4.se" },
+  { name: "TV4 Fakta", code: "TV4Fakta.se" },
+  { name: "TV4 Film", code: "TV4Film.se" },
+  { name: "TV4 Fotboll", code: "TV4Fotboll.se" },
+  { name: "TV4 Guld", code: "TV4Guld.se" },
+  { name: "TV4 Hits", code: "TV4Hits.se" },
+  { name: "TV4 Hockey", code: "TV4Hockey.se" },
+  { name: "TV4 Motor", code: "TV4Motor.se" },
+  { name: "TV4 Sport Live 1", code: "TV4SportLive1.se" },
+  { name: "TV4 Sport Live 2", code: "TV4SportLive2.se" },
+  { name: "TV4 Sport Live 3", code: "TV4SportLive3.se" },
+  { name: "TV4 Sport Live 4", code: "TV4SportLive4.se" },
+  { name: "TV4 Stars", code: "TV4Stars.se" },
+  { name: "TV4 Tennis", code: "TV4Tennis.se" },
+  { name: "TV6 HD", code: "TV6.se" },
+  { name: "TV8", code: "TV8.se" },
+  { name: "TVE", code: "TVE.se" },
+  { name: "V Sport Extra HD", code: "ViasatSportExtra.se" },
+  { name: "V Sport Vinter", code: "ViasatSportVinter.se" },
+  { name: "Viasat Explorer", code: "ViasatExplore.se" },
+  { name: "Viasat Film Action", code: "ViasatFilmAction.se" },
+  { name: "Viasat Film Family", code: "ViasatFilmFamily.se" },
+  { name: "Viasat Film Hits", code: "ViasatFilmHits.se" },
+  { name: "Viasat Film Premiere HD", code: "ViasatFilmPremiere.se" },
+  { name: "Viasat Fotboll", code: "ViasatFotboll.se" },
+  { name: "Viasat Golf", code: "ViasatGolf.se" },
+  { name: "Viasat History", code: "ViasatHistory.se" },
+  { name: "Viasat Motor", code: "ViasatMotor.se" },
+  { name: "Viasat Nature/Crime", code: "ViasatNatureCrime.se" },
+  { name: "Viasat Series HD", code: "ViasatSeries.se" },
+  { name: "Viasat Sport", code: "ViasatSport.se" },
+  { name: "Viasat Sport Premium HD", code: "ViasatSportPremium.se" },
+  { name: "Vision Sverige", code: "VisionSverige.se" },
+];
+
 function ChannelLogo({
   logo,
   name,
@@ -968,6 +1058,58 @@ function getEpgBadgeStyle(match: EpgMatch) {
   };
 }
 
+function compactForEpgIdMatch(value: string) {
+  return cleanNameForEpg(value)
+    .replace(/\b(sverige|sweden|se|hd|fhd|uhd|sd|fullhd|full hd)\b/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/\s+/g, "");
+}
+
+function findBuiltInSwedishEpgCode(channel: Channel): BuiltInEpgCode | null {
+  const channelCandidates = [
+    channel.tvgName,
+    channel.name,
+    channel.name.replace(/^se\s*[:|-]\s*/i, ""),
+  ]
+    .filter(Boolean)
+    .map(compactForEpgIdMatch)
+    .filter(Boolean);
+
+  const sortedCodes = [...SWEDISH_EPG_CODES].sort((a, b) => {
+    return compactForEpgIdMatch(b.name).length - compactForEpgIdMatch(a.name).length;
+  });
+
+  for (const candidate of channelCandidates) {
+    for (const item of sortedCodes) {
+      const itemClean = compactForEpgIdMatch(item.name);
+      const codeClean = compactForEpgIdMatch(item.code.replace(/\.se$/i, ""));
+
+      if (candidate === itemClean || candidate === codeClean) {
+        return item;
+      }
+    }
+  }
+
+  for (const candidate of channelCandidates) {
+    for (const item of sortedCodes) {
+      const itemClean = compactForEpgIdMatch(item.name);
+      const codeClean = compactForEpgIdMatch(item.code.replace(/\.se$/i, ""));
+
+      if (
+        candidate.includes(itemClean) ||
+        itemClean.includes(candidate) ||
+        candidate.includes(codeClean) ||
+        codeClean.includes(candidate)
+      ) {
+        return item;
+      }
+    }
+  }
+
+  return null;
+}
+
 function getLogoBadgeStyle(channel: Channel, isBroken: boolean) {
   if (!channel.tvgLogo) {
     return {
@@ -1673,6 +1815,75 @@ export default function App() {
     });
   }
 
+  function applyBuiltInSwedishEpgIds() {
+    if (channels.length === 0) {
+      return;
+    }
+
+    if (selectedGroup === "All Channels") {
+      const confirmed = window.confirm(
+        "You are on All Channels. This will scan all channels and apply Swedish EPG IDs where it finds a match.\n\nContinue?"
+      );
+
+      if (!confirmed) {
+        return;
+      }
+    }
+
+    const targetGroup = selectedGroup;
+    let checked = 0;
+    let matched = 0;
+    let changed = 0;
+    let alreadyCorrect = 0;
+
+    setChannels((current) =>
+      current.map((channel) => {
+        if (targetGroup !== "All Channels" && channel.group !== targetGroup) {
+          return channel;
+        }
+
+        checked++;
+
+        const match = findBuiltInSwedishEpgCode(channel);
+
+        if (!match) {
+          return channel;
+        }
+
+        matched++;
+
+        if (channel.tvgId === match.code) {
+          alreadyCorrect++;
+          return channel;
+        }
+
+        const updatedChannel: Channel = {
+          ...channel,
+          tvgId: match.code,
+          tvgName: channel.tvgName || match.name,
+        };
+
+        changed++;
+
+        return {
+          ...updatedChannel,
+          rawInfo: updateChannelRawInfo(updatedChannel),
+        };
+      })
+    );
+
+    closeFloatingMenus();
+
+    window.alert(
+      `Swedish EPG IDs applied.\n\n` +
+        `Target: ${targetGroup}\n` +
+        `Checked: ${checked.toLocaleString()}\n` +
+        `Matched: ${matched.toLocaleString()}\n` +
+        `Changed: ${changed.toLocaleString()}\n` +
+        `Already correct: ${alreadyCorrect.toLocaleString()}`
+    );
+  }
+
   function applySmartEpgMatches() {
     if (epgChannels.length === 0) {
       window.alert("Import an EPG file first.");
@@ -2271,6 +2482,13 @@ export default function App() {
         style={style}
         onClick={(event) => event.stopPropagation()}
       >
+        <button onClick={applyBuiltInSwedishEpgIds}>
+          <span className="menuIcon">
+            <CheckCircle2 size={23} strokeWidth={2.5} />
+          </span>
+          <span>Apply Swedish EPG IDs</span>
+        </button>
+
         <button disabled={epgChannels.length === 0} onClick={applySmartEpgMatches}>
           <span className="menuIcon">
             <CheckCircle2 size={23} strokeWidth={2.5} />
@@ -2830,6 +3048,14 @@ export default function App() {
                       Clear
                     </button>
                   )}
+
+                  <button
+                    className="textActionButton tooltipButton"
+                    data-tooltip="Apply built-in Swedish EPG IDs to current group"
+                    onClick={applyBuiltInSwedishEpgIds}
+                  >
+                    Swedish EPG IDs
+                  </button>
 
                   {epgChannels.length > 0 && (
                     <button
