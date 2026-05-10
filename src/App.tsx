@@ -172,6 +172,23 @@ const SWEDISH_EPG_CODES: BuiltInEpgCode[] = [
   { name: "TV6 HD", code: "TV6.se" },
   { name: "TV8", code: "TV8.se" },
   { name: "TVE", code: "TVE.se" },
+
+  { name: "V Film Action", code: "ViasatFilmAction.se" },
+  { name: "V Film Family", code: "ViasatFilmFamily.se" },
+  { name: "V Film Hits", code: "ViasatFilmHits.se" },
+  { name: "V Film Premiere", code: "ViasatFilmPremiere.se" },
+  { name: "V Film Premiere HD", code: "ViasatFilmPremiere.se" },
+  { name: "V Series", code: "ViasatSeries.se" },
+  { name: "V Series HD", code: "ViasatSeries.se" },
+  { name: "V Fotboll", code: "ViasatFotboll.se" },
+  { name: "V Fotboll HD", code: "ViasatFotboll.se" },
+  { name: "V Sport", code: "ViasatSport.se" },
+  { name: "V Sport HD", code: "ViasatSport.se" },
+  { name: "V Sport Premium", code: "ViasatSportPremium.se" },
+  { name: "V Sport Premium HD", code: "ViasatSportPremium.se" },
+  { name: "V Sport Premium FHD", code: "ViasatSportPremium.se" },
+  { name: "Viasat Explore", code: "ViasatExplore.se" },
+
   { name: "V Sport Extra HD", code: "ViasatSportExtra.se" },
   { name: "V Sport Vinter", code: "ViasatSportVinter.se" },
   { name: "Viasat Explorer", code: "ViasatExplore.se" },
@@ -213,7 +230,7 @@ function ChannelLogo({
         onStatusChange?.("missing");
       }
     }
-  }, [logo]);
+  }, [logo, onStatusChange]);
 
   const wrapperStyle = {
     width: size,
@@ -2487,28 +2504,38 @@ export default function App() {
     });
   }
 
-  function renderChannelMenu(style?: React.CSSProperties) {
+  function renderChannelMenu(
+    style?: React.CSSProperties,
+    showEpgTools = true
+  ) {
     return (
       <div
         className="popupMenu rightMenu m3uMenu"
         style={style}
         onClick={(event) => event.stopPropagation()}
       >
-        <button onClick={applyBuiltInSwedishEpgIds}>
-          <span className="menuIcon">
-            <CheckCircle2 size={23} strokeWidth={2.5} />
-          </span>
-          <span>Apply Swedish EPG IDs</span>
-        </button>
+        {showEpgTools && (
+          <>
+            <button onClick={applyBuiltInSwedishEpgIds}>
+              <span className="menuIcon">
+                <CheckCircle2 size={23} strokeWidth={2.5} />
+              </span>
+              <span>Apply Swedish EPG IDs</span>
+            </button>
 
-        <button disabled={epgChannels.length === 0} onClick={applySmartEpgMatches}>
-          <span className="menuIcon">
-            <CheckCircle2 size={23} strokeWidth={2.5} />
-          </span>
-          <span>Apply XML EPG / Logo matches</span>
-        </button>
+            <button
+              disabled={epgChannels.length === 0}
+              onClick={applySmartEpgMatches}
+            >
+              <span className="menuIcon">
+                <CheckCircle2 size={23} strokeWidth={2.5} />
+              </span>
+              <span>Apply XML EPG / Logo matches</span>
+            </button>
 
-        <hr />
+            <hr />
+          </>
+        )}
 
         <button
           disabled={selectedChannelIds.length === 0}
@@ -3061,24 +3088,6 @@ export default function App() {
                     </button>
                   )}
 
-                  <button
-                    className="textActionButton tooltipButton"
-                    data-tooltip="Apply built-in Swedish EPG IDs to current group"
-                    onClick={applyBuiltInSwedishEpgIds}
-                  >
-                    Swedish EPG IDs
-                  </button>
-
-                  {epgChannels.length > 0 && (
-                    <button
-                      className="textActionButton tooltipButton"
-                      data-tooltip="Apply smart XML EPG and logo matches"
-                      onClick={applySmartEpgMatches}
-                    >
-                      Apply XML EPG / Logo
-                    </button>
-                  )}
-
                   <label
                     className="textActionButton tooltipButton"
                     data-tooltip="Import EPG XML or XML.GZ"
@@ -3108,6 +3117,14 @@ export default function App() {
                     data-tooltip="EPG details"
                     disabled={selectedChannelIds.length !== 1}
                     onClick={openEpgModal}
+                    style={{
+                      fontSize: 13,
+                      fontWeight: 800,
+                      width: 38,
+                      minWidth: 38,
+                      height: 34,
+                      padding: 0,
+                    }}
                   >
                     EPG
                   </button>
@@ -3427,12 +3444,15 @@ export default function App() {
           </section>
 
           {contextMenu?.type === "channel" &&
-            renderChannelMenu({
-              position: "fixed",
-              left: Math.min(contextMenu.x, window.innerWidth - 330),
-              top: Math.min(contextMenu.y, window.innerHeight - 560),
-              zIndex: 9999,
-            })}
+            renderChannelMenu(
+              {
+                position: "fixed",
+                left: Math.min(contextMenu.x, window.innerWidth - 330),
+                top: Math.min(contextMenu.y, window.innerHeight - 520),
+                zIndex: 9999,
+              },
+              false
+            )}
 
           {contextMenu?.type === "group" &&
             renderGroupMenu({
