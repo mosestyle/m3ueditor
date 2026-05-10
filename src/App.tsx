@@ -5,7 +5,6 @@ import {
   ArrowUpToLine,
   CheckCircle2,
   Copy as CopyIcon,
-  Eye,
   FolderInput,
   Image as ImageIcon,
   ListFilter,
@@ -104,6 +103,15 @@ type BuiltInEpgCode = {
   name: string;
   code: string;
 };
+
+type HistorySnapshot = {
+  channels: Channel[];
+  groupOrder: string[];
+  selectedGroup: string;
+  epgTargetGroup: string;
+};
+
+const MAX_HISTORY_STEPS = 50;
 
 const SWEDISH_EPG_CODES: BuiltInEpgCode[] = [
   { name: "Animal Planet", code: "AnimalPlanet.se" },
@@ -533,7 +541,6 @@ async function readEpgChannelsFromFile(
 
   return epgChannels;
 }
-
 function buildEpgIndexes(epgChannels: EpgChannel[]): EpgIndexes {
   const byId = new Map<string, EpgChannel>();
   const byExactName = new Map<string, EpgChannel[]>();
@@ -809,6 +816,29 @@ function updateChannelRawInfo(channel: Channel): string {
   return line;
 }
 
+function cloneChannels(channels: Channel[]) {
+  return channels.map((channel) => ({ ...channel }));
+}
+
+function cloneSnapshot(snapshot: HistorySnapshot): HistorySnapshot {
+  return {
+    channels: cloneChannels(snapshot.channels),
+    groupOrder: [...snapshot.groupOrder],
+    selectedGroup: snapshot.selectedGroup,
+    epgTargetGroup: snapshot.epgTargetGroup,
+  };
+}
+
+function makeSafeFileName(value: string) {
+  return value
+    .trim()
+    .replace(/[<>:"/\\|?*]+/g, "-")
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 80);
+}
+
 function exportM3U(channels: Channel[], originalFileName: string) {
   let output = "#EXTM3U\n";
 
@@ -827,6 +857,25 @@ function exportM3U(channels: Channel[], originalFileName: string) {
   const link = document.createElement("a");
   link.href = url;
   link.download = `${cleanName}-edited.m3u`;
+  link.click();
+
+  URL.revokeObjectURL(url);
+}
+
+function exportM3UWithName(channels: Channel[], downloadName: string) {
+  let output = "#EXTM3U\n";
+
+  for (const channel of channels) {
+    const updatedInfo = updateChannelRawInfo(channel);
+    output += `${updatedInfo}\n${channel.url}\n`;
+  }
+
+  const blob = new Blob([output], { type: "audio/x-mpegurl;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = downloadName;
   link.click();
 
   URL.revokeObjectURL(url);
@@ -879,7 +928,7 @@ function moveItemsNearTarget(
   ];
 }
 
-function insertChannelsAtTopOfGroup(
+function insertChannelsAtBottomOfGroup(
   current: Channel[],
   itemsToInsert: Channel[],
   targetGroup: string,
@@ -888,18 +937,18 @@ function insertChannelsAtTopOfGroup(
   const removeSet = new Set(removeIds);
   const remaining = current.filter((channel) => !removeSet.has(channel.id));
 
-  const firstTargetGroupIndex = remaining.findIndex(
-    (channel) => channel.group === targetGroup
-  );
+  const lastTargetGroupIndex = remaining
+    .map((channel) => channel.group)
+    .lastIndexOf(targetGroup);
 
-  if (firstTargetGroupIndex === -1) {
-    return [...itemsToInsert, ...remaining];
+  if (lastTargetGroupIndex === -1) {
+    return [...remaining, ...itemsToInsert];
   }
 
   return [
-    ...remaining.slice(0, firstTargetGroupIndex),
+    ...remaining.slice(0, lastTargetGroupIndex + 1),
     ...itemsToInsert,
-    ...remaining.slice(firstTargetGroupIndex),
+    ...remaining.slice(lastTargetGroupIndex + 1),
   ];
 }
 
@@ -1225,6 +1274,9 @@ export default function App() {
     mode: "contains",
   });
 
+  const [undoStack, setUndoStack] = useState<HistorySnapshot[]>([]);
+  const [redoStack, setRedoStack] = useState<HistorySnapshot[]>([]);
+
   const channelListRef = useRef<HTMLDivElement | null>(null);
   const dropIndicatorRef = useRef<HTMLDivElement | null>(null);
   const currentDropTargetRef = useRef<DropTarget | null>(null);
@@ -1274,8 +1326,7 @@ export default function App() {
   }, [channels, selectedChannelIds]);
 
   const selectedEpgChannel = selectedLogoChannel;
-
-  const groupsFromChannels = useMemo(() => {
+    const groupsFromChannels = useMemo(() => {
     const seen = new Set<string>();
     const result: string[] = [];
 
@@ -1451,6 +1502,72 @@ export default function App() {
     bulkRenameForm.prefix.trim() ||
     bulkRenameForm.suffix.trim() ||
     bulkRenameForm.find.trim();
+
+  const canUndo = undoStack.length > 0;
+  const canRedo = redoStack.length > 0;
+
+  function makeSnapshot(): HistorySnapshot {
+    return {
+      channels: cloneChannels(channels),
+      groupOrder: [...groupOrder],
+      selectedGroup,
+      epgTargetGroup,
+    };
+  }
+
+  function pushUndoSnapshot() {
+    const snapshot = makeSnapshot();
+
+    setUndoStack((current) => {
+      const next = [...current, snapshot];
+      return next.slice(-MAX_HISTORY_STEPS);
+    });
+
+    setRedoStack([]);
+  }
+
+  function restoreSnapshot(snapshot: HistorySnapshot) {
+    const cloned = cloneSnapshot(snapshot);
+
+    setChannels(cloned.channels);
+    setGroupOrder(cloned.groupOrder);
+    setSelectedGroup(cloned.selectedGroup);
+    setEpgTargetGroup(cloned.epgTargetGroup);
+
+    setSelectedChannelIds([]);
+    setSelectedGroupNames([]);
+    setLastSelectedChannelId("");
+    setLastSelectedGroupName("");
+    setBrokenLogoIds([]);
+    closeFloatingMenus();
+    resetDragState();
+  }
+
+  function undoLastAction() {
+    if (undoStack.length === 0) {
+      return;
+    }
+
+    const previous = undoStack[undoStack.length - 1];
+    const currentSnapshot = makeSnapshot();
+
+    setUndoStack((current) => current.slice(0, -1));
+    setRedoStack((current) => [...current, currentSnapshot].slice(-MAX_HISTORY_STEPS));
+    restoreSnapshot(previous);
+  }
+
+  function redoLastAction() {
+    if (redoStack.length === 0) {
+      return;
+    }
+
+    const next = redoStack[redoStack.length - 1];
+    const currentSnapshot = makeSnapshot();
+
+    setRedoStack((current) => current.slice(0, -1));
+    setUndoStack((current) => [...current, currentSnapshot].slice(-MAX_HISTORY_STEPS));
+    restoreSnapshot(next);
+  }
 
   function closeFloatingMenus() {
     setOpenMenu(null);
@@ -1632,6 +1749,8 @@ export default function App() {
       setDeleteConfirm(null);
       setBulkRenameOpen(false);
       setContextMenu(null);
+      setUndoStack([]);
+      setRedoStack([]);
       resetDragState();
     };
 
@@ -1746,6 +1865,7 @@ export default function App() {
       return;
     }
 
+    pushUndoSnapshot();
     setGroupOrder((current) => [cleanGroupName, ...current]);
     setSelectedGroup(cleanGroupName);
     setSelectedGroupNames([cleanGroupName]);
@@ -1773,6 +1893,8 @@ export default function App() {
       window.alert("That group name already exists.");
       return;
     }
+
+    pushUndoSnapshot();
 
     setChannels((current) =>
       current.map((channel) =>
@@ -1804,6 +1926,8 @@ export default function App() {
   function performDelete(channelIds: string[], groupNames: string[]) {
     const channelIdSet = new Set(channelIds);
     const groupNameSet = new Set(groupNames);
+
+    pushUndoSnapshot();
 
     setChannels((current) =>
       current.filter(
@@ -1848,6 +1972,40 @@ export default function App() {
       channelIds,
       groupNames,
     });
+  }
+
+  function exportGroups(groupNames: string[]) {
+    const cleanGroups = Array.from(
+      new Set(groupNames.filter((group) => group && group !== "All Channels"))
+    );
+
+    if (cleanGroups.length === 0) {
+      return;
+    }
+
+    const groupSet = new Set(cleanGroups);
+    const exportChannels = channels.filter((channel) => groupSet.has(channel.group));
+
+    if (exportChannels.length === 0) {
+      window.alert("No channels found in selected group(s).");
+      return;
+    }
+
+    const baseName = fileName
+      ? fileName.replace(/\.(m3u8?|txt)$/i, "")
+      : "playlist";
+
+    const suffix =
+      cleanGroups.length === 1
+        ? makeSafeFileName(cleanGroups[0])
+        : `${cleanGroups.length}-groups`;
+
+    exportM3UWithName(
+      exportChannels,
+      `${makeSafeFileName(baseName)}-${suffix}.m3u`
+    );
+
+    closeFloatingMenus();
   }
 
   function applyBuiltInSwedishEpgIds() {
@@ -1905,6 +2063,19 @@ export default function App() {
       };
     });
 
+    if (changed === 0) {
+      window.alert(
+        `Swedish EPG IDs applied.\n\n` +
+          `Target: ${targetGroup}\n` +
+          `Checked: ${checked.toLocaleString()}\n` +
+          `Matched: ${matched.toLocaleString()}\n` +
+          `Changed: ${changed.toLocaleString()}\n` +
+          `Already correct: ${alreadyCorrect.toLocaleString()}`
+      );
+      return;
+    }
+
+    pushUndoSnapshot();
     setChannels(updatedChannels);
     closeFloatingMenus();
 
@@ -1977,6 +2148,12 @@ export default function App() {
       };
     });
 
+    if (applied === 0) {
+      window.alert("No EPG / logo matches to apply.");
+      return;
+    }
+
+    pushUndoSnapshot();
     setChannels(updatedChannels);
 
     if (logoIdsToClear.length > 0) {
@@ -1986,12 +2163,7 @@ export default function App() {
     }
 
     closeFloatingMenus();
-
-    window.alert(
-      applied > 0
-        ? `Applied ${applied.toLocaleString()} EPG / logo match(es).`
-        : "No EPG / logo matches to apply."
-    );
+    window.alert(`Applied ${applied.toLocaleString()} EPG / logo match(es).`);
   }
 
   function openBulkRename() {
@@ -2009,26 +2181,39 @@ export default function App() {
     }
 
     const selectedSet = new Set(selectedChannelIds);
+    let changed = 0;
 
-    setChannels((current) =>
-      current.map((channel) => {
-        if (!selectedSet.has(channel.id)) {
-          return channel;
-        }
+    const updatedChannels = channels.map((channel) => {
+      if (!selectedSet.has(channel.id)) {
+        return channel;
+      }
 
-        const newName = bulkRenameName(channel.name, bulkRenameForm);
+      const newName = bulkRenameName(channel.name, bulkRenameForm);
 
-        const updatedChannel = {
-          ...channel,
-          name: newName,
-        };
+      if (newName === channel.name) {
+        return channel;
+      }
 
-        return {
-          ...updatedChannel,
-          rawInfo: updateChannelRawInfo(updatedChannel),
-        };
-      })
-    );
+      changed++;
+
+      const updatedChannel = {
+        ...channel,
+        name: newName,
+      };
+
+      return {
+        ...updatedChannel,
+        rawInfo: updateChannelRawInfo(updatedChannel),
+      };
+    });
+
+    if (changed === 0) {
+      setBulkRenameOpen(false);
+      return;
+    }
+
+    pushUndoSnapshot();
+    setChannels(updatedChannels);
 
     setBulkRenameOpen(false);
     setBulkRenameForm({
@@ -2046,6 +2231,7 @@ export default function App() {
       return;
     }
 
+    pushUndoSnapshot();
     const nextOrder = moveSelectedGroupsToTop(groups, groupNames);
     setGroupOrder(nextOrder);
     setChannels((current) => reorderChannelsByGroupOrder(current, nextOrder));
@@ -2057,6 +2243,7 @@ export default function App() {
       return;
     }
 
+    pushUndoSnapshot();
     const nextOrder = moveSelectedGroupsToBottom(groups, groupNames);
     setGroupOrder(nextOrder);
     setChannels((current) => reorderChannelsByGroupOrder(current, nextOrder));
@@ -2069,6 +2256,8 @@ export default function App() {
     if (!cleanGroupName || channelIds.length === 0) {
       return;
     }
+
+    pushUndoSnapshot();
 
     setGroupOrder((current) => {
       if (current.includes(cleanGroupName)) {
@@ -2089,7 +2278,7 @@ export default function App() {
           rawInfo: updateGroupInRawInfo(channel.rawInfo, cleanGroupName),
         }));
 
-      return insertChannelsAtTopOfGroup(
+      return insertChannelsAtBottomOfGroup(
         current,
         movedChannels,
         cleanGroupName,
@@ -2111,6 +2300,8 @@ export default function App() {
     if (!cleanGroupName || channelIds.length === 0) {
       return;
     }
+
+    pushUndoSnapshot();
 
     setGroupOrder((current) => {
       if (current.includes(cleanGroupName)) {
@@ -2141,7 +2332,11 @@ export default function App() {
           rawInfo: updateGroupInRawInfo(channel.rawInfo, cleanGroupName),
         }));
 
-      return insertChannelsAtTopOfGroup(current, copiedChannels, cleanGroupName);
+      return insertChannelsAtBottomOfGroup(
+        current,
+        copiedChannels,
+        cleanGroupName
+      );
     });
 
     setSelectedGroup(cleanGroupName);
@@ -2164,6 +2359,8 @@ export default function App() {
     if (selectedChannelIds.length === 0) {
       return;
     }
+
+    pushUndoSnapshot();
 
     const selectedSet = new Set(selectedChannelIds);
 
@@ -2197,6 +2394,8 @@ export default function App() {
     if (selectedChannelIds.length === 0) {
       return;
     }
+
+    pushUndoSnapshot();
 
     const selectedSet = new Set(selectedChannelIds);
 
@@ -2265,6 +2464,29 @@ export default function App() {
     const cleanName = channelEditForm.name.trim() || "Unnamed channel";
     const cleanLogo = normalizeLogoUrl(channelEditForm.tvgLogo);
 
+    const selectedChannel = channels.find(
+      (channel) => channel.id === channelEditForm.id
+    );
+
+    if (!selectedChannel) {
+      return;
+    }
+
+    const hasChanges =
+      selectedChannel.name !== cleanName ||
+      selectedChannel.url !== channelEditForm.url.trim() ||
+      selectedChannel.tvgId !== channelEditForm.tvgId.trim() ||
+      selectedChannel.tvgName !== channelEditForm.tvgName.trim() ||
+      selectedChannel.tvgLogo !== cleanLogo;
+
+    if (!hasChanges) {
+      setChannelEditOpen(false);
+      setChannelEditForm(null);
+      return;
+    }
+
+    pushUndoSnapshot();
+
     setChannels((current) =>
       current.map((channel) => {
         if (channel.id !== channelEditForm.id) {
@@ -2331,6 +2553,8 @@ export default function App() {
 
     const bestName = epgChannel.names[0] || selectedEpgChannel.tvgName;
 
+    pushUndoSnapshot();
+
     setChannels((current) =>
       current.map((channel) => {
         if (channel.id !== selectedEpgChannel.id) {
@@ -2392,6 +2616,8 @@ export default function App() {
       return;
     }
 
+    pushUndoSnapshot();
+
     setChannels((current) =>
       moveItemsNearTarget(
         current,
@@ -2406,6 +2632,8 @@ export default function App() {
 
   function handleGroupDrop(targetGroup: string) {
     if (draggedGroup && draggedGroup !== targetGroup && groupDropTarget) {
+      pushUndoSnapshot();
+
       const nextOrder = reorderArrayItem(
         groups,
         draggedGroup,
@@ -2551,13 +2779,6 @@ export default function App() {
           </span>
         </button>
 
-        <button disabled={selectedChannelIds.length === 0}>
-          <span className="menuIcon">
-            <Eye size={23} strokeWidth={2.5} />
-          </span>
-          <span>Show / Hide...</span>
-        </button>
-
         <button
           disabled={selectedChannelIds.length === 0}
           onClick={() => {
@@ -2622,6 +2843,8 @@ export default function App() {
   }
 
   function renderGroupMenu(style?: React.CSSProperties) {
+    const canExportGroups = groupActionTargets.length > 0;
+
     return (
       <div
         className="popupMenu m3uMenu"
@@ -2656,6 +2879,20 @@ export default function App() {
             <Trash2 size={22} strokeWidth={2.5} />
           </span>
           <span>Delete group(s)</span>
+        </button>
+
+        <hr />
+
+        <button
+          disabled={!canExportGroups}
+          onClick={() => exportGroups(groupActionTargets)}
+        >
+          <span className="menuIcon">⇩</span>
+          <span>
+            {groupActionTargets.length > 1
+              ? "Export groups"
+              : "Export group"}
+          </span>
         </button>
 
         <hr />
@@ -2717,6 +2954,22 @@ export default function App() {
         return;
       }
 
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z") {
+        event.preventDefault();
+        undoLastAction();
+        return;
+      }
+
+      if (
+        (event.ctrlKey || event.metaKey) &&
+        (event.key.toLowerCase() === "y" ||
+          (event.shiftKey && event.key.toLowerCase() === "z"))
+      ) {
+        event.preventDefault();
+        redoLastAction();
+        return;
+      }
+
       if (event.key === "Escape") {
         closeFloatingMenus();
         return;
@@ -2748,9 +3001,11 @@ export default function App() {
     epgTargetModalOpen,
     groupPickerMode,
     logoPreviewOpen,
+    redoStack,
     renameGroupOpen,
     selectedChannelIds,
     selectedGroupNames,
+    undoStack,
   ]);
 
   return (
@@ -2790,6 +3045,24 @@ export default function App() {
               }}
             />
           </label>
+
+          <button
+            className="primaryButton tooltipButton tooltipLeft"
+            data-tooltip="Undo last action"
+            disabled={!canUndo}
+            onClick={undoLastAction}
+          >
+            Undo
+          </button>
+
+          <button
+            className="primaryButton tooltipButton tooltipLeft"
+            data-tooltip="Redo last undone action"
+            disabled={!canRedo}
+            onClick={redoLastAction}
+          >
+            Redo
+          </button>
 
           <button
             className="primaryButton tooltipButton tooltipLeft"
@@ -3458,7 +3731,7 @@ export default function App() {
             renderGroupMenu({
               position: "fixed",
               left: Math.min(contextMenu.x, window.innerWidth - 330),
-              top: Math.min(contextMenu.y, window.innerHeight - 360),
+              top: Math.min(contextMenu.y, window.innerHeight - 430),
               zIndex: 9999,
             })}
 

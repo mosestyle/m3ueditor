@@ -37,7 +37,7 @@ select:disabled {
 
 .topBar {
   height: 56px;
-  background: linear-gradient(90deg, #3f51b5, #673ab7);
+  background: #3f50b5;
   color: white;
   display: flex;
   align-items: center;
@@ -49,20 +49,12 @@ select:disabled {
 .brand {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 0;
   min-width: 0;
 }
 
 .logoMark {
-  width: 30px;
-  height: 30px;
-  border-radius: 8px;
-  background: #ef4444;
-  color: white;
-  display: grid;
-  place-items: center;
-  font-weight: 800;
-  flex: 0 0 auto;
+  display: none;
 }
 
 .brand h1 {
@@ -93,7 +85,7 @@ select:disabled {
 .actionBar button {
   border: 0;
   border-radius: 8px;
-  background: #3f51b5;
+  background: #3f50b5;
   color: white;
   padding: 8px 12px;
   min-height: 34px;
@@ -184,7 +176,7 @@ select:disabled {
 
 .bigImportButton {
   display: inline-block;
-  background: #3f51b5;
+  background: #3f50b5;
   padding: 12px 18px;
 }
 
@@ -303,7 +295,7 @@ select:disabled {
 .textActionButton {
   border: 0;
   background: transparent;
-  color: #3f51b5;
+  color: #3f50b5;
   font-weight: 700;
   border-radius: 999px;
   min-height: 34px;
@@ -319,6 +311,44 @@ select:disabled {
 .textActionButton {
   padding: 8px 10px;
   font-size: 14px;
+}
+
+.channelHeader .textActionButton,
+.channelHeader .iconButton {
+  font-family: Arial, sans-serif !important;
+  font-size: 14px !important;
+  font-weight: 700 !important;
+  letter-spacing: normal !important;
+  line-height: 1 !important;
+  text-transform: none !important;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: geometricPrecision;
+}
+
+.channelHeader .textActionButton {
+  height: 34px !important;
+  padding: 0 10px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+}
+
+.channelHeader .iconButton {
+  height: 34px !important;
+  min-width: 34px !important;
+  padding: 0 8px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+}
+
+.channelHeader .iconButton[data-tooltip="EPG details"] {
+  width: 38px !important;
+  min-width: 38px !important;
+  height: 34px !important;
+  padding: 0 !important;
+  font-size: 14px !important;
+  font-weight: 700 !important;
 }
 
 .iconButton:hover,
@@ -395,7 +425,7 @@ select:disabled {
 .menuIcon {
   width: 32px;
   min-width: 32px;
-  color: #3f51b5;
+  color: #3f50b5;
   font-size: 24px;
   font-weight: 800;
   line-height: 1;
@@ -470,10 +500,10 @@ select:disabled {
   left: 8px;
   right: 8px;
   height: 3px;
-  background: #3f51b5;
+  background: #3f50b5;
   border-radius: 999px;
   z-index: 5;
-  box-shadow: 0 0 0 3px rgba(63, 81, 181, 0.12);
+  box-shadow: 0 0 0 3px rgba(63, 80, 181, 0.12);
 }
 
 .groupRow.groupDropAbove::before {
@@ -564,7 +594,7 @@ select:disabled {
 }
 
 .actionBar button {
-  background: #3f51b5;
+  background: #3f50b5;
   flex: 0 0 auto;
 }
 
@@ -621,11 +651,11 @@ select:disabled {
   right: 12px;
   top: 0;
   height: 3px;
-  background: #3f51b5;
+  background: #3f50b5;
   border-radius: 999px;
   z-index: 20;
   pointer-events: none;
-  box-shadow: 0 0 0 3px rgba(63, 81, 181, 0.12);
+  box-shadow: 0 0 0 3px rgba(63, 80, 181, 0.12);
   will-change: transform;
 }
 
@@ -648,7 +678,7 @@ select:disabled {
   height: 22px;
   border-radius: 4px;
   background: #e5e7eb;
-  color: #3f51b5;
+  color: #3f50b5;
   display: grid;
   place-items: center;
   font-size: 11px;
@@ -777,7 +807,7 @@ select:disabled {
 }
 
 .modalSearch span {
-  color: #3f51b5;
+  color: #3f50b5;
   font-size: 22px;
 }
 
@@ -818,7 +848,7 @@ select:disabled {
 }
 
 .folderIcon {
-  color: #3f51b5;
+  color: #3f50b5;
 }
 
 .modalGroupList em {
@@ -866,7 +896,7 @@ select:disabled {
 }
 
 .modalFooter .confirmButton {
-  background: #3f51b5;
+  background: #3f50b5;
   color: white;
 }
 
@@ -939,7 +969,7 @@ select:disabled {
 .rightMenu .menuIcon {
   width: 32px !important;
   min-width: 32px !important;
-  color: #3f51b5 !important;
+  color: #3f50b5 !important;
   font-size: 24px !important;
   font-weight: 800 !important;
   line-height: 1 !important;
@@ -974,6 +1004,7 @@ select:disabled {
   .topBar {
     height: auto;
     min-height: 56px;
+    background: #3f50b5;
     flex-direction: column;
     align-items: stretch;
     gap: 10px;
