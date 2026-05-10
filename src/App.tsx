@@ -926,7 +926,6 @@ export default function App() {
   const [channels, setChannels] = useState<Channel[]>([]);
   const [groupOrder, setGroupOrder] = useState<string[]>([]);
   const [fileName, setFileName] = useState("");
-  const [epgFileName, setEpgFileName] = useState("");
   const [epgChannels, setEpgChannels] = useState<EpgChannel[]>([]);
   const [epgImportStatus, setEpgImportStatus] = useState("");
   const [epgTargetGroup, setEpgTargetGroup] = useState("All Channels");
@@ -1342,7 +1341,6 @@ export default function App() {
     try {
       setEpgImportStatus("Preparing EPG import...");
       setEpgChannels([]);
-      setEpgFileName("");
 
       const parsedEpgChannels = await readEpgChannelsFromFile(file, (message) => {
         setEpgImportStatus(message);
@@ -1355,7 +1353,6 @@ export default function App() {
       );
 
       setEpgChannels(parsedEpgChannels);
-      setEpgFileName(file.name);
       setEpgImportStatus("");
 
       if (parsedEpgChannels.length === 0) {
