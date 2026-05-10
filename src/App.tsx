@@ -1836,42 +1836,41 @@ export default function App() {
     let changed = 0;
     let alreadyCorrect = 0;
 
-    setChannels((current) =>
-      current.map((channel) => {
-        if (targetGroup !== "All Channels" && channel.group !== targetGroup) {
-          return channel;
-        }
+    const updatedChannels = channels.map((channel) => {
+      if (targetGroup !== "All Channels" && channel.group !== targetGroup) {
+        return channel;
+      }
 
-        checked++;
+      checked++;
 
-        const match = findBuiltInSwedishEpgCode(channel);
+      const match = findBuiltInSwedishEpgCode(channel);
 
-        if (!match) {
-          return channel;
-        }
+      if (!match) {
+        return channel;
+      }
 
-        matched++;
+      matched++;
 
-        if (channel.tvgId === match.code) {
-          alreadyCorrect++;
-          return channel;
-        }
+      if (channel.tvgId === match.code) {
+        alreadyCorrect++;
+        return channel;
+      }
 
-        const updatedChannel: Channel = {
-          ...channel,
-          tvgId: match.code,
-          tvgName: channel.tvgName || match.name,
-        };
+      const updatedChannel: Channel = {
+        ...channel,
+        tvgId: match.code,
+        tvgName: channel.tvgName || match.name,
+      };
 
-        changed++;
+      changed++;
 
-        return {
-          ...updatedChannel,
-          rawInfo: updateChannelRawInfo(updatedChannel),
-        };
-      })
-    );
+      return {
+        ...updatedChannel,
+        rawInfo: updateChannelRawInfo(updatedChannel),
+      };
+    });
 
+    setChannels(updatedChannels);
     closeFloatingMenus();
 
     window.alert(
