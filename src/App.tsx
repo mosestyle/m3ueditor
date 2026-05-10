@@ -1016,28 +1016,28 @@ function bulkRenameName(name: string, form: BulkRenameForm) {
 function getEpgBadgeStyle(match: EpgMatch) {
   if (match.status === "matched-id") {
     return {
-      text: "EPG",
+      text: "XML EPG",
       background: "#dcfce7",
       color: "#166534",
-      title: "EPG matched by tvg-id",
+      title: "EPG matched by imported XML tvg-id",
     };
   }
 
   if (match.status === "matched-name") {
     return {
-      text: "EPG?",
+      text: "XML EPG?",
       background: "#fef9c3",
       color: "#854d0e",
-      title: "Possible EPG match by smart name matching",
+      title: "Possible EPG match by imported XML smart name matching",
     };
   }
 
   if (match.status === "missing-id") {
     return {
-      text: "NO EPG",
+      text: "NO XML EPG",
       background: "#fee2e2",
       color: "#991b1b",
-      title: "tvg-id was not found in EPG",
+      title: "tvg-id was not found in imported XML",
     };
   }
 
@@ -1122,7 +1122,7 @@ function getLogoBadgeStyle(channel: Channel, isBroken: boolean) {
 
   if (isBroken) {
     return {
-      text: "BROKEN",
+      text: "BROKEN LOGO",
       background: "#fee2e2",
       color: "#991b1b",
       title: "Logo URL exists, but the image could not be loaded",
@@ -1134,6 +1134,24 @@ function getLogoBadgeStyle(channel: Channel, isBroken: boolean) {
     background: "#dbeafe",
     color: "#1e40af",
     title: "Logo URL found",
+  };
+}
+
+function getIdBadgeStyle(channel: Channel) {
+  if (channel.tvgId.trim()) {
+    return {
+      text: "ID OK",
+      background: "#dcfce7",
+      color: "#166534",
+      title: `EPG ID exists: ${channel.tvgId}`,
+    };
+  }
+
+  return {
+    text: "NO ID",
+    background: "#e5e7eb",
+    color: "#374151",
+    title: "No tvg-id found",
   };
 }
 
@@ -2271,12 +2289,7 @@ export default function App() {
 
   function openEpgModal() {
     if (selectedChannelIds.length !== 1) {
-      window.alert("Select exactly one channel to edit EPG.");
-      return;
-    }
-
-    if (epgChannels.length === 0) {
-      window.alert("Import an EPG XML or XML.GZ file first.");
+      window.alert("Select exactly one channel to view or edit EPG.");
       return;
     }
 
@@ -2492,7 +2505,7 @@ export default function App() {
           <span className="menuIcon">
             <CheckCircle2 size={23} strokeWidth={2.5} />
           </span>
-          <span>Apply EPG / Logo matches</span>
+          <span>Apply XML EPG / Logo matches</span>
         </button>
 
         <hr />
@@ -2789,7 +2802,7 @@ export default function App() {
               <span>
                 {channels.length.toLocaleString()} total channels
                 {epgChannels.length > 0 &&
-                  ` • EPG target: ${epgTargetGroup} • ${epgStats.matched.toLocaleString()} exact • ${epgStats.possible.toLocaleString()} possible`}
+                  ` • XML EPG target: ${epgTargetGroup} • ${epgStats.matched.toLocaleString()} exact • ${epgStats.possible.toLocaleString()} possible`}
                 {` • Logos: ${logoStats.withLogo.toLocaleString()} with URL • ${logoStats.missingLogo.toLocaleString()} missing`}
                 {logoStats.brokenLogo > 0 &&
                   ` • ${logoStats.brokenLogo.toLocaleString()} broken`}
@@ -3059,10 +3072,10 @@ export default function App() {
                   {epgChannels.length > 0 && (
                     <button
                       className="textActionButton tooltipButton"
-                      data-tooltip="Apply smart EPG and logo matches"
+                      data-tooltip="Apply smart XML EPG and logo matches"
                       onClick={applySmartEpgMatches}
                     >
-                      Apply EPG / Logo
+                      Apply XML EPG / Logo
                     </button>
                   )}
 
@@ -3092,7 +3105,7 @@ export default function App() {
 
                   <button
                     className="iconButton tooltipButton"
-                    data-tooltip="EPG"
+                    data-tooltip="EPG details"
                     disabled={selectedChannelIds.length !== 1}
                     onClick={openEpgModal}
                   >
@@ -3253,6 +3266,7 @@ export default function App() {
                   };
                   const epgBadge = getEpgBadgeStyle(epgMatch);
                   const logoBadge = getLogoBadgeStyle(channel, isBrokenLogo);
+                  const idBadge = getIdBadgeStyle(channel);
 
                   return (
                     <div
@@ -3352,6 +3366,23 @@ export default function App() {
                           }}
                         >
                           {logoBadge.text}
+                        </span>
+
+                        <span
+                          title={idBadge.title}
+                          style={{
+                            background: idBadge.background,
+                            color: idBadge.color,
+                            borderRadius: 999,
+                            padding: "2px 7px",
+                            fontSize: 10,
+                            fontWeight: 800,
+                            fontStyle: "normal",
+                            whiteSpace: "nowrap",
+                            flex: "0 0 auto",
+                          }}
+                        >
+                          {idBadge.text}
                         </span>
 
                         {epgChannels.length > 0 &&
@@ -3507,8 +3538,12 @@ export default function App() {
               >
                 <div className="modalTitle">
                   <span>EPG</span>
-                  <h2>EPG Mapping</h2>
-                  <em>{epgChannels.length.toLocaleString()} EPG channels</em>
+                  <h2>EPG Details</h2>
+                  <em>
+                    {epgChannels.length > 0
+                      ? `${epgChannels.length.toLocaleString()} XML EPG channels`
+                      : "No XML imported"}
+                  </em>
                 </div>
 
                 <div className="editForm">
@@ -3525,120 +3560,170 @@ export default function App() {
                     <div
                       style={{
                         display: "grid",
-                        gridTemplateColumns: "120px 1fr",
+                        gridTemplateColumns: "140px 1fr",
                         gap: 8,
                         marginTop: 12,
                         color: "#374151",
                       }}
                     >
-                      <span>Cleaned name</span>
-                      <code>{cleanNameForEpg(selectedEpgChannel.name)}</code>
+                      <span>EPG ID status</span>
+                      <code>
+                        {selectedEpgChannel.tvgId
+                          ? `ID OK: ${selectedEpgChannel.tvgId}`
+                          : "NO ID"}
+                      </code>
 
-                      <span>Current tvg-id</span>
+                      <span>Channel name</span>
+                      <code>{selectedEpgChannel.name || "Empty"}</code>
+
+                      <span>Cleaned name</span>
+                      <code>{cleanNameForEpg(selectedEpgChannel.name) || "Empty"}</code>
+
+                      <span>tvg-id</span>
                       <code>{selectedEpgChannel.tvgId || "Empty"}</code>
 
-                      <span>Current tvg-name</span>
+                      <span>tvg-name</span>
                       <code>{selectedEpgChannel.tvgName || "Empty"}</code>
+
+                      <span>tvg-logo</span>
+                      <code
+                        style={{
+                          whiteSpace: "nowrap",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                        }}
+                      >
+                        {selectedEpgChannel.tvgLogo || "Empty"}
+                      </code>
 
                       <span>Group</span>
                       <code>{selectedEpgChannel.group}</code>
                     </div>
                   </div>
 
-                  <label>
-                    Search EPG channels
-                    <input
-                      autoFocus
-                      value={epgSearch}
-                      onChange={(event) => setEpgSearch(event.target.value)}
-                      placeholder="Search by EPG id or display name..."
-                    />
-                  </label>
+                  {epgChannels.length === 0 && (
+                    <div
+                      style={{
+                        border: "1px solid #dbeafe",
+                        borderRadius: 12,
+                        padding: 16,
+                        background: "#eff6ff",
+                        color: "#1e3a8a",
+                        lineHeight: 1.6,
+                      }}
+                    >
+                      <strong>Current EPG ID is shown above.</strong>
+                      <div style={{ marginTop: 6 }}>
+                        Swedish EPG IDs do not require an XML file. They write the
+                        ID directly into <code>tvg-id</code>, for example{" "}
+                        <code>SVT1.se</code> or <code>TV4.se</code>.
+                      </div>
+                      <div style={{ marginTop: 6 }}>
+                        Import an XML/XML.GZ file only if you want to search and
+                        map against a full XMLTV channel list or apply XML logo
+                        links.
+                      </div>
+                    </div>
+                  )}
 
-                  <div
-                    style={{
-                      border: "1px solid #e5e7eb",
-                      borderRadius: 12,
-                      overflow: "hidden",
-                      maxHeight: 340,
-                      overflowY: "auto",
-                    }}
-                  >
-                    {epgSearchResults.map((epgChannel) => (
-                      <button
-                        key={`${epgChannel.id}-${epgChannel.names.join("|")}-${epgChannel.logo}`}
-                        onClick={() => applyEpgChannelToSelected(epgChannel)}
-                        style={{
-                          width: "100%",
-                          border: 0,
-                          borderBottom: "1px solid #e5e7eb",
-                          background: "white",
-                          textAlign: "left",
-                          padding: "12px 14px",
-                          display: "grid",
-                          gridTemplateColumns: "1fr auto",
-                          gap: 12,
-                          alignItems: "center",
-                        }}
-                      >
-                        <div style={{ minWidth: 0 }}>
-                          <strong>
-                            {epgChannel.names[0] || epgChannel.id || "Unnamed EPG"}
-                          </strong>
-                          <div
-                            style={{
-                              color: "#6b7280",
-                              fontSize: 12,
-                              marginTop: 4,
-                              whiteSpace: "nowrap",
-                              overflow: "hidden",
-                              textOverflow: "ellipsis",
-                            }}
-                          >
-                            {epgChannel.names.slice(1).join(" • ") ||
-                              "No extra names"}
-                          </div>
-                          <div
-                            style={{
-                              color: epgChannel.logo ? "#166534" : "#9ca3af",
-                              fontSize: 11,
-                              marginTop: 3,
-                            }}
-                          >
-                            {epgChannel.logo ? "Logo found" : "No logo"}
-                          </div>
-                        </div>
+                  {epgChannels.length > 0 && (
+                    <>
+                      <label>
+                        Search XML EPG channels
+                        <input
+                          autoFocus
+                          value={epgSearch}
+                          onChange={(event) => setEpgSearch(event.target.value)}
+                          placeholder="Search by EPG id or display name..."
+                        />
+                      </label>
 
-                        <code
-                          style={{
-                            color: "#4338ca",
-                            background: "#eef2ff",
-                            borderRadius: 999,
-                            padding: "4px 8px",
-                            fontSize: 12,
-                          }}
-                        >
-                          {epgChannel.id || "No ID"}
-                        </code>
-                      </button>
-                    ))}
-
-                    {epgSearchResults.length === 0 && (
                       <div
                         style={{
-                          padding: 18,
-                          color: "#6b7280",
-                          textAlign: "center",
+                          border: "1px solid #e5e7eb",
+                          borderRadius: 12,
+                          overflow: "hidden",
+                          maxHeight: 340,
+                          overflowY: "auto",
                         }}
                       >
-                        No EPG channels found.
+                        {epgSearchResults.map((epgChannel) => (
+                          <button
+                            key={`${epgChannel.id}-${epgChannel.names.join("|")}-${epgChannel.logo}`}
+                            onClick={() => applyEpgChannelToSelected(epgChannel)}
+                            style={{
+                              width: "100%",
+                              border: 0,
+                              borderBottom: "1px solid #e5e7eb",
+                              background: "white",
+                              textAlign: "left",
+                              padding: "12px 14px",
+                              display: "grid",
+                              gridTemplateColumns: "1fr auto",
+                              gap: 12,
+                              alignItems: "center",
+                            }}
+                          >
+                            <div style={{ minWidth: 0 }}>
+                              <strong>
+                                {epgChannel.names[0] || epgChannel.id || "Unnamed EPG"}
+                              </strong>
+                              <div
+                                style={{
+                                  color: "#6b7280",
+                                  fontSize: 12,
+                                  marginTop: 4,
+                                  whiteSpace: "nowrap",
+                                  overflow: "hidden",
+                                  textOverflow: "ellipsis",
+                                }}
+                              >
+                                {epgChannel.names.slice(1).join(" • ") ||
+                                  "No extra names"}
+                              </div>
+                              <div
+                                style={{
+                                  color: epgChannel.logo ? "#166534" : "#9ca3af",
+                                  fontSize: 11,
+                                  marginTop: 3,
+                                }}
+                              >
+                                {epgChannel.logo ? "Logo found" : "No logo"}
+                              </div>
+                            </div>
+
+                            <code
+                              style={{
+                                color: "#4338ca",
+                                background: "#eef2ff",
+                                borderRadius: 999,
+                                padding: "4px 8px",
+                                fontSize: 12,
+                              }}
+                            >
+                              {epgChannel.id || "No ID"}
+                            </code>
+                          </button>
+                        ))}
+
+                        {epgSearchResults.length === 0 && (
+                          <div
+                            style={{
+                              padding: 18,
+                              color: "#6b7280",
+                              textAlign: "center",
+                            }}
+                          >
+                            No XML EPG channels found.
+                          </div>
+                        )}
                       </div>
-                    )}
-                  </div>
+                    </>
+                  )}
                 </div>
 
                 <div className="modalFooter">
-                  <button onClick={closeModals}>Cancel</button>
+                  <button onClick={closeModals}>Close</button>
                 </div>
               </div>
             </div>
