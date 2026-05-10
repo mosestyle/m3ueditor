@@ -13,6 +13,7 @@ import {
   Plus,
   Trash2,
   Type,
+  X,
 } from "lucide-react";
 import "./App.css";
 
@@ -30,6 +31,7 @@ type Channel = {
 type EpgChannel = {
   id: string;
   names: string[];
+  logo: string;
 };
 
 type EpgMatchStatus =
@@ -94,26 +96,45 @@ type ContextMenuState = {
   y: number;
 } | null;
 
+type LogoStatus = "ok" | "missing" | "broken";
+
+type LogoFilter = "all" | "has-logo" | "missing-logo" | "broken-logo";
+
 function ChannelLogo({
   logo,
   name,
   size = 22,
+  onStatusChange,
 }: {
   logo: string;
   name: string;
   size?: number;
+  onStatusChange?: (status: LogoStatus) => void;
 }) {
   const [failed, setFailed] = useState(false);
+  const lastLogoRef = useRef("");
+
+  useEffect(() => {
+    if (lastLogoRef.current !== logo) {
+      lastLogoRef.current = logo;
+      setFailed(false);
+
+      if (!logo) {
+        onStatusChange?.("missing");
+      }
+    }
+  }, [logo]);
 
   const wrapperStyle = {
     width: size,
     height: size,
     minWidth: size,
-    borderRadius: 4,
+    borderRadius: 5,
     background: "#e5e7eb",
     display: "grid",
     placeItems: "center",
     overflow: "hidden",
+    border: "1px solid rgba(0,0,0,0.06)",
   };
 
   if (!logo || failed) {
@@ -130,12 +151,19 @@ function ChannelLogo({
         src={logo}
         alt={name}
         loading="lazy"
-        onError={() => setFailed(true)}
+        onLoad={() => {
+          onStatusChange?.("ok");
+        }}
+        onError={() => {
+          setFailed(true);
+          onStatusChange?.("broken");
+        }}
         style={{
           width: "100%",
           height: "100%",
           objectFit: "contain",
           display: "block",
+          padding: size >= 60 ? 4 : 1,
         }}
       />
     </div>
@@ -153,6 +181,20 @@ function decodeXmlEntities(value: string) {
     .replace(/&apos;/g, "'")
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">");
+}
+
+function normalizeLogoUrl(value: string) {
+  const decoded = decodeXmlEntities(value.trim());
+
+  if (!decoded) {
+    return "";
+  }
+
+  if (decoded.startsWith("http://")) {
+    return `https://${decoded.slice("http://".length)}`;
+  }
+
+  return decoded;
 }
 
 function cleanNameForEpg(value: string) {
@@ -231,7 +273,7 @@ function parseM3U(text: string): Channel[] {
         rawInfo: line,
         tvgId: getAttribute(line, "tvg-id"),
         tvgName: getAttribute(line, "tvg-name"),
-        tvgLogo: getAttribute(line, "tvg-logo"),
+        tvgLogo: normalizeLogoUrl(getAttribute(line, "tvg-logo")),
       });
     }
   }
@@ -249,13 +291,17 @@ function parseEpgChannelBlock(block: string): EpgChannel | null {
     .map((match) => decodeXmlEntities(match[1].replace(/<[^>]+>/g, "").trim()))
     .filter(Boolean);
 
-  if (!id && names.length === 0) {
+  const iconMatch = block.match(/<icon\b[^>]*\bsrc\s*=\s*"([^"]*)"/i);
+  const logo = normalizeLogoUrl(iconMatch?.[1] || "");
+
+  if (!id && names.length === 0 && !logo) {
     return null;
   }
 
   return {
     id,
     names,
+    logo,
   };
 }
 
@@ -922,6 +968,33 @@ function getEpgBadgeStyle(match: EpgMatch) {
   };
 }
 
+function getLogoBadgeStyle(channel: Channel, isBroken: boolean) {
+  if (!channel.tvgLogo) {
+    return {
+      text: "NO LOGO",
+      background: "#e5e7eb",
+      color: "#374151",
+      title: "No tvg-logo URL found",
+    };
+  }
+
+  if (isBroken) {
+    return {
+      text: "BROKEN",
+      background: "#fee2e2",
+      color: "#991b1b",
+      title: "Logo URL exists, but the image could not be loaded",
+    };
+  }
+
+  return {
+    text: "LOGO",
+    background: "#dbeafe",
+    color: "#1e40af",
+    title: "Logo URL found",
+  };
+}
+
 export default function App() {
   const [channels, setChannels] = useState<Channel[]>([]);
   const [groupOrder, setGroupOrder] = useState<string[]>([]);
@@ -940,6 +1013,8 @@ export default function App() {
   const [lastSelectedGroupName, setLastSelectedGroupName] = useState("");
   const [contextMenu, setContextMenu] = useState<ContextMenuState>(null);
   const [searchText, setSearchText] = useState("");
+  const [logoFilter, setLogoFilter] = useState<LogoFilter>("all");
+  const [brokenLogoIds, setBrokenLogoIds] = useState<string[]>([]);
   const [newGroupName, setNewGroupName] = useState("");
   const [draggedChannelIds, setDraggedChannelIds] = useState<string[]>([]);
   const [dragOverGroup, setDragOverGroup] = useState("");
@@ -977,6 +1052,10 @@ export default function App() {
   const dropIndicatorRef = useRef<HTMLDivElement | null>(null);
   const currentDropTargetRef = useRef<DropTarget | null>(null);
 
+  const brokenLogoSet = useMemo(() => {
+    return new Set(brokenLogoIds);
+  }, [brokenLogoIds]);
+
   const selectedChannelSet = useMemo(() => {
     return new Set(selectedChannelIds);
   }, [selectedChannelIds]);
@@ -984,6 +1063,30 @@ export default function App() {
   const selectedGroupSet = useMemo(() => {
     return new Set(selectedGroupNames);
   }, [selectedGroupNames]);
+
+  const logoStats = useMemo(() => {
+    let withLogo = 0;
+    let missingLogo = 0;
+    let brokenLogo = 0;
+
+    for (const channel of channels) {
+      if (!channel.tvgLogo) {
+        missingLogo++;
+      } else {
+        withLogo++;
+      }
+
+      if (brokenLogoSet.has(channel.id)) {
+        brokenLogo++;
+      }
+    }
+
+    return {
+      withLogo,
+      missingLogo,
+      brokenLogo,
+    };
+  }, [channels, brokenLogoSet]);
 
   const selectedLogoChannel = useMemo(() => {
     if (selectedChannelIds.length !== 1) {
@@ -1101,6 +1204,21 @@ export default function App() {
         return false;
       }
 
+      if (
+        logoFilter === "has-logo" &&
+        (!channel.tvgLogo || brokenLogoSet.has(channel.id))
+      ) {
+        return false;
+      }
+
+      if (logoFilter === "missing-logo" && channel.tvgLogo) {
+        return false;
+      }
+
+      if (logoFilter === "broken-logo" && !brokenLogoSet.has(channel.id)) {
+        return false;
+      }
+
       if (!search) {
         return true;
       }
@@ -1110,10 +1228,11 @@ export default function App() {
         channel.group.toLowerCase().includes(search) ||
         channel.url.toLowerCase().includes(search) ||
         channel.tvgId.toLowerCase().includes(search) ||
-        channel.tvgName.toLowerCase().includes(search)
+        channel.tvgName.toLowerCase().includes(search) ||
+        channel.tvgLogo.toLowerCase().includes(search)
       );
     });
-  }, [channels, selectedGroup, searchText]);
+  }, [channels, selectedGroup, searchText, logoFilter, brokenLogoSet]);
 
   const visibleChannels = filteredChannels.slice(0, 1000);
 
@@ -1159,6 +1278,26 @@ export default function App() {
   function closeFloatingMenus() {
     setOpenMenu(null);
     setContextMenu(null);
+  }
+
+  function markLogoStatus(channelId: string, status: LogoStatus) {
+    setBrokenLogoIds((current) => {
+      const exists = current.includes(channelId);
+
+      if (status === "broken") {
+        if (exists) {
+          return current;
+        }
+
+        return [...current, channelId];
+      }
+
+      if (!exists) {
+        return current;
+      }
+
+      return current.filter((id) => id !== channelId);
+    });
   }
 
   function selectChannelWithEvent(
@@ -1303,6 +1442,8 @@ export default function App() {
       setSelectedGroup("All Channels");
       setEpgTargetGroup("All Channels");
       setPendingEpgTargetGroup("All Channels");
+      setLogoFilter("all");
+      setBrokenLogoIds([]);
       setSelectedGroupNames([]);
       setSelectedChannelIds([]);
       setLastSelectedChannelId("");
@@ -1494,6 +1635,10 @@ export default function App() {
       )
     );
 
+    setBrokenLogoIds((current) =>
+      current.filter((id) => !channelIdSet.has(id))
+    );
+
     if (groupNames.length > 0) {
       setGroupOrder((current) =>
         current.filter((group) => !groupNameSet.has(group))
@@ -1535,6 +1680,7 @@ export default function App() {
     }
 
     let applied = 0;
+    const logoIdsToClear: string[] = [];
 
     const updatedChannels = channels.map((channel) => {
       const match = getEpgMatchForChannel(
@@ -1544,17 +1690,39 @@ export default function App() {
         epgTargetGroup
       );
 
-      if (match.status !== "matched-name" || !match.epgChannel?.id) {
+      if (
+        (match.status !== "matched-name" && match.status !== "matched-id") ||
+        !match.epgChannel
+      ) {
         return channel;
       }
 
       const bestName = match.epgChannel.names[0] || channel.tvgName;
+      const shouldUseEpgLogo =
+        Boolean(match.epgChannel.logo) &&
+        (!channel.tvgLogo || brokenLogoSet.has(channel.id));
 
       const updatedChannel: Channel = {
         ...channel,
-        tvgId: match.epgChannel.id,
-        tvgName: bestName,
+        tvgId: match.epgChannel.id || channel.tvgId,
+        tvgName: bestName || channel.tvgName,
+        tvgLogo: shouldUseEpgLogo
+          ? match.epgChannel.logo
+          : channel.tvgLogo,
       };
+
+      const changed =
+        updatedChannel.tvgId !== channel.tvgId ||
+        updatedChannel.tvgName !== channel.tvgName ||
+        updatedChannel.tvgLogo !== channel.tvgLogo;
+
+      if (!changed) {
+        return channel;
+      }
+
+      if (shouldUseEpgLogo) {
+        logoIdsToClear.push(channel.id);
+      }
 
       applied++;
 
@@ -1565,12 +1733,19 @@ export default function App() {
     });
 
     setChannels(updatedChannels);
+
+    if (logoIdsToClear.length > 0) {
+      setBrokenLogoIds((current) =>
+        current.filter((id) => !logoIdsToClear.includes(id))
+      );
+    }
+
     closeFloatingMenus();
 
     window.alert(
       applied > 0
-        ? `Applied ${applied.toLocaleString()} smart EPG match(es).`
-        : "No EPG? matches to apply."
+        ? `Applied ${applied.toLocaleString()} EPG / logo match(es).`
+        : "No EPG / logo matches to apply."
     );
   }
 
@@ -1843,6 +2018,7 @@ export default function App() {
     }
 
     const cleanName = channelEditForm.name.trim() || "Unnamed channel";
+    const cleanLogo = normalizeLogoUrl(channelEditForm.tvgLogo);
 
     setChannels((current) =>
       current.map((channel) => {
@@ -1856,7 +2032,7 @@ export default function App() {
           url: channelEditForm.url.trim(),
           tvgId: channelEditForm.tvgId.trim(),
           tvgName: channelEditForm.tvgName.trim(),
-          tvgLogo: channelEditForm.tvgLogo.trim(),
+          tvgLogo: cleanLogo,
         };
 
         return {
@@ -1864,6 +2040,10 @@ export default function App() {
           rawInfo: updateChannelRawInfo(updatedChannel),
         };
       })
+    );
+
+    setBrokenLogoIds((current) =>
+      current.filter((id) => id !== channelEditForm.id)
     );
 
     setChannelEditOpen(false);
@@ -1917,10 +2097,17 @@ export default function App() {
           return channel;
         }
 
+        const shouldUseEpgLogo =
+          Boolean(epgChannel.logo) &&
+          (!channel.tvgLogo || brokenLogoSet.has(channel.id));
+
         const updatedChannel: Channel = {
           ...channel,
-          tvgId: epgChannel.id,
-          tvgName: bestName,
+          tvgId: epgChannel.id || channel.tvgId,
+          tvgName: bestName || channel.tvgName,
+          tvgLogo: shouldUseEpgLogo
+            ? epgChannel.logo
+            : channel.tvgLogo,
         };
 
         return {
@@ -1929,6 +2116,12 @@ export default function App() {
         };
       })
     );
+
+    if (epgChannel.logo) {
+      setBrokenLogoIds((current) =>
+        current.filter((id) => id !== selectedEpgChannel.id)
+      );
+    }
 
     setEpgModalOpen(false);
   }
@@ -2078,14 +2271,11 @@ export default function App() {
         style={style}
         onClick={(event) => event.stopPropagation()}
       >
-        <button
-          disabled={epgStats.possible === 0}
-          onClick={applySmartEpgMatches}
-        >
+        <button disabled={epgChannels.length === 0} onClick={applySmartEpgMatches}>
           <span className="menuIcon">
             <CheckCircle2 size={23} strokeWidth={2.5} />
           </span>
-          <span>Apply EPG? matches</span>
+          <span>Apply EPG / Logo matches</span>
         </button>
 
         <hr />
@@ -2339,6 +2529,7 @@ export default function App() {
               onChange={(event) => {
                 const file = event.target.files?.[0];
                 if (file) handleFile(file);
+                event.target.value = "";
               }}
             />
           </label>
@@ -2382,6 +2573,9 @@ export default function App() {
                 {channels.length.toLocaleString()} total channels
                 {epgChannels.length > 0 &&
                   ` • EPG target: ${epgTargetGroup} • ${epgStats.matched.toLocaleString()} exact • ${epgStats.possible.toLocaleString()} possible`}
+                {` • Logos: ${logoStats.withLogo.toLocaleString()} with URL • ${logoStats.missingLogo.toLocaleString()} missing`}
+                {logoStats.brokenLogo > 0 &&
+                  ` • ${logoStats.brokenLogo.toLocaleString()} broken`}
                 {epgImportStatus && ` • ${epgImportStatus}`}
               </span>
             </div>
@@ -2393,6 +2587,27 @@ export default function App() {
                 onChange={(event) => setSearchText(event.target.value)}
                 placeholder="Search all channels..."
               />
+
+              <select
+                value={logoFilter}
+                onChange={(event) => setLogoFilter(event.target.value as LogoFilter)}
+                title="Logo filter"
+                style={{
+                  minWidth: 145,
+                  height: 36,
+                  border: "1px solid #d1d5db",
+                  borderRadius: 10,
+                  padding: "0 10px",
+                  background: "white",
+                  color: "#111827",
+                  fontWeight: 600,
+                }}
+              >
+                <option value="all">All logos</option>
+                <option value="has-logo">Has logo</option>
+                <option value="missing-logo">Missing logo</option>
+                <option value="broken-logo">Broken logo</option>
+              </select>
 
               <button
                 className="tooltipButton"
@@ -2616,13 +2831,13 @@ export default function App() {
                     </button>
                   )}
 
-                  {epgStats.possible > 0 && (
+                  {epgChannels.length > 0 && (
                     <button
                       className="textActionButton tooltipButton"
-                      data-tooltip="Apply smart EPG matches"
+                      data-tooltip="Apply smart EPG and logo matches"
                       onClick={applySmartEpgMatches}
                     >
-                      Apply EPG?
+                      Apply EPG / Logo
                     </button>
                   )}
 
@@ -2806,11 +3021,13 @@ export default function App() {
                 {visibleChannels.map((channel) => {
                   const isSelected = selectedChannelSet.has(channel.id);
                   const isDragging = draggedChannelIds.includes(channel.id);
+                  const isBrokenLogo = brokenLogoSet.has(channel.id);
                   const epgMatch = epgMatchMap.get(channel.id) || {
                     status: "no-epg",
                     epgChannel: null,
                   };
                   const epgBadge = getEpgBadgeStyle(epgMatch);
+                  const logoBadge = getLogoBadgeStyle(channel, isBrokenLogo);
 
                   return (
                     <div
@@ -2888,9 +3105,29 @@ export default function App() {
                         <ChannelLogo
                           logo={channel.tvgLogo}
                           name={channel.name}
-                          size={24}
+                          size={26}
+                          onStatusChange={(status) =>
+                            markLogoStatus(channel.id, status)
+                          }
                         />
                         <span>{channel.name}</span>
+
+                        <span
+                          title={logoBadge.title}
+                          style={{
+                            background: logoBadge.background,
+                            color: logoBadge.color,
+                            borderRadius: 999,
+                            padding: "2px 7px",
+                            fontSize: 10,
+                            fontWeight: 800,
+                            fontStyle: "normal",
+                            whiteSpace: "nowrap",
+                            flex: "0 0 auto",
+                          }}
+                        >
+                          {logoBadge.text}
+                        </span>
 
                         {epgChannels.length > 0 &&
                           epgMatch.status !== "not-target-group" && (
@@ -3104,7 +3341,7 @@ export default function App() {
                   >
                     {epgSearchResults.map((epgChannel) => (
                       <button
-                        key={`${epgChannel.id}-${epgChannel.names.join("|")}`}
+                        key={`${epgChannel.id}-${epgChannel.names.join("|")}-${epgChannel.logo}`}
                         onClick={() => applyEpgChannelToSelected(epgChannel)}
                         style={{
                           width: "100%",
@@ -3135,6 +3372,15 @@ export default function App() {
                           >
                             {epgChannel.names.slice(1).join(" • ") ||
                               "No extra names"}
+                          </div>
+                          <div
+                            style={{
+                              color: epgChannel.logo ? "#166534" : "#9ca3af",
+                              fontSize: 11,
+                              marginTop: 3,
+                            }}
+                          >
+                            {epgChannel.logo ? "Logo found" : "No logo"}
                           </div>
                         </div>
 
@@ -3556,15 +3802,40 @@ export default function App() {
 
                   <label>
                     tvg-logo
-                    <input
-                      value={channelEditForm.tvgLogo}
-                      onChange={(event) =>
-                        setChannelEditForm({
-                          ...channelEditForm,
-                          tvgLogo: event.target.value,
-                        })
-                      }
-                    />
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <input
+                        value={channelEditForm.tvgLogo}
+                        onChange={(event) =>
+                          setChannelEditForm({
+                            ...channelEditForm,
+                            tvgLogo: event.target.value,
+                          })
+                        }
+                        style={{ flex: 1 }}
+                      />
+
+                      <button
+                        type="button"
+                        title="Clear logo"
+                        onClick={() =>
+                          setChannelEditForm({
+                            ...channelEditForm,
+                            tvgLogo: "",
+                          })
+                        }
+                        style={{
+                          border: "1px solid #d1d5db",
+                          background: "white",
+                          borderRadius: 10,
+                          padding: "0 12px",
+                          display: "grid",
+                          placeItems: "center",
+                          cursor: "pointer",
+                        }}
+                      >
+                        <X size={18} />
+                      </button>
+                    </div>
                   </label>
 
                   <div
@@ -3581,7 +3852,7 @@ export default function App() {
                     <ChannelLogo
                       logo={channelEditForm.tvgLogo}
                       name={channelEditForm.name}
-                      size={64}
+                      size={72}
                     />
                     <div style={{ minWidth: 0 }}>
                       <strong>Logo preview</strong>
@@ -3617,7 +3888,7 @@ export default function App() {
               <div
                 className="smallModal"
                 onClick={(event) => event.stopPropagation()}
-                style={{ width: 520 }}
+                style={{ width: 560 }}
               >
                 <h2>Logo Preview</h2>
 
@@ -3632,7 +3903,10 @@ export default function App() {
                   <ChannelLogo
                     logo={selectedLogoChannel.tvgLogo}
                     name={selectedLogoChannel.name}
-                    size={96}
+                    size={112}
+                    onStatusChange={(status) =>
+                      markLogoStatus(selectedLogoChannel.id, status)
+                    }
                   />
 
                   <div style={{ minWidth: 0 }}>
@@ -3648,7 +3922,7 @@ export default function App() {
                         overflow: "hidden",
                         textOverflow: "ellipsis",
                         whiteSpace: "nowrap",
-                        maxWidth: 360,
+                        maxWidth: 390,
                       }}
                     >
                       {selectedLogoChannel.tvgLogo || "No logo URL found"}
@@ -3658,6 +3932,23 @@ export default function App() {
 
                 <div className="modalFooter">
                   <button onClick={closeModals}>Close</button>
+                  <button
+                    className="confirmButton"
+                    onClick={() => {
+                      setChannelEditForm({
+                        id: selectedLogoChannel.id,
+                        name: selectedLogoChannel.name,
+                        url: selectedLogoChannel.url,
+                        tvgId: selectedLogoChannel.tvgId,
+                        tvgName: selectedLogoChannel.tvgName,
+                        tvgLogo: selectedLogoChannel.tvgLogo,
+                      });
+                      setLogoPreviewOpen(false);
+                      setChannelEditOpen(true);
+                    }}
+                  >
+                    Edit logo
+                  </button>
                 </div>
               </div>
             </div>
