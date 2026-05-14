@@ -978,6 +978,36 @@ function reorderArrayItem(
   ];
 }
 
+function reorderMultipleGroups(
+  items: string[],
+  draggedItems: string[],
+  targetItem: string,
+  position: "above" | "below"
+): string[] {
+  const draggedSet = new Set(draggedItems);
+
+  if (draggedSet.has(targetItem)) {
+    return items;
+  }
+
+  const movingItems = items.filter((item) => draggedSet.has(item));
+  const remainingItems = items.filter((item) => !draggedSet.has(item));
+
+  const targetIndex = remainingItems.indexOf(targetItem);
+
+  if (targetIndex === -1) {
+    return items;
+  }
+
+  const insertIndex = position === "below" ? targetIndex + 1 : targetIndex;
+
+  return [
+    ...remainingItems.slice(0, insertIndex),
+    ...movingItems,
+    ...remainingItems.slice(insertIndex),
+  ];
+}
+
 function reorderChannelsByGroupOrder(
   channels: Channel[],
   groupOrder: string[]
@@ -1245,6 +1275,7 @@ export default function App() {
   const [draggedChannelIds, setDraggedChannelIds] = useState<string[]>([]);
   const [dragOverGroup, setDragOverGroup] = useState("");
   const [draggedGroup, setDraggedGroup] = useState("");
+  const [draggedGroupNames, setDraggedGroupNames] = useState<string[]>([]);
   const [groupDropTarget, setGroupDropTarget] = useState<GroupDropTarget | null>(
     null
   );
@@ -1326,7 +1357,7 @@ export default function App() {
   }, [channels, selectedChannelIds]);
 
   const selectedEpgChannel = selectedLogoChannel;
-    const groupsFromChannels = useMemo(() => {
+  const groupsFromChannels = useMemo(() => {
     const seen = new Set<string>();
     const result: string[] = [];
 
@@ -1703,6 +1734,7 @@ export default function App() {
   function resetDragState() {
     setDraggedChannelIds([]);
     setDraggedGroup("");
+    setDraggedGroupNames([]);
     setDragOverGroup("");
     setGroupDropTarget(null);
     hideDropIndicator();
@@ -2600,6 +2632,17 @@ export default function App() {
     return [channelId];
   }
 
+  function startDraggingGroup(group: string) {
+    const dragGroups = selectedGroupSet.has(group)
+      ? selectedGroupNames
+      : [group];
+
+    setDraggedGroup(group);
+    setDraggedGroupNames(dragGroups);
+
+    return dragGroups;
+  }
+
   function dropChannelsOnGroup(groupName: string) {
     if (draggedChannelIds.length === 0) {
       return;
@@ -2631,6 +2674,26 @@ export default function App() {
   }
 
   function handleGroupDrop(targetGroup: string) {
+    if (
+      draggedGroupNames.length > 0 &&
+      !draggedGroupNames.includes(targetGroup) &&
+      groupDropTarget
+    ) {
+      pushUndoSnapshot();
+
+      const nextOrder = reorderMultipleGroups(
+        groups,
+        draggedGroupNames,
+        targetGroup,
+        groupDropTarget.position
+      );
+
+      setGroupOrder(nextOrder);
+      setChannels((current) => reorderChannelsByGroupOrder(current, nextOrder));
+      resetDragState();
+      return;
+    }
+
     if (draggedGroup && draggedGroup !== targetGroup && groupDropTarget) {
       pushUndoSnapshot();
 
@@ -3241,7 +3304,9 @@ export default function App() {
                     selectedGroup === group ? "active" : "",
                     selectedGroupSet.has(group) ? "groupSelected" : "",
                     dragOverGroup === group ? "dragOver" : "",
-                    draggedGroup === group ? "groupDragging" : "",
+                    draggedGroupNames.includes(group) || draggedGroup === group
+                      ? "groupDragging"
+                      : "",
                     dropPosition === "above" ? "groupDropAbove" : "",
                     dropPosition === "below" ? "groupDropBelow" : "",
                   ]
@@ -3252,6 +3317,26 @@ export default function App() {
                     <button
                       key={group}
                       className={className}
+                      draggable
+                      onDragStart={(event) => {
+                        const dragGroups = startDraggingGroup(group);
+
+                        const previewText =
+                          dragGroups.length === 1
+                            ? `Move group: ${group}`
+                            : `Move ${dragGroups.length.toLocaleString()} groups`;
+
+                        const preview = createDragPreview(previewText);
+                        event.dataTransfer.setDragImage(preview, 12, 12);
+
+                        window.setTimeout(() => {
+                          preview.remove();
+                        }, 0);
+
+                        event.dataTransfer.effectAllowed = "move";
+                        event.dataTransfer.setData("text/plain", group);
+                      }}
+                      onDragEnd={resetDragState}
                       onClick={(event) => {
                         if (event.shiftKey) {
                           selectGroupWithEvent(group, event);
@@ -3263,6 +3348,17 @@ export default function App() {
                       onContextMenu={(event) => openGroupContextMenu(event, group)}
                       onDragOver={(event) => {
                         event.preventDefault();
+
+                        if (
+                          draggedGroupNames.length > 0 &&
+                          !draggedGroupNames.includes(group)
+                        ) {
+                          setGroupDropTarget({
+                            group,
+                            position: getRowDropPosition(event),
+                          });
+                          return;
+                        }
 
                         if (draggedGroup && draggedGroup !== group) {
                           setGroupDropTarget({
@@ -3297,24 +3393,8 @@ export default function App() {
 
                       <span
                         className="dragDots dragHandle"
-                        draggable
                         title=""
                         onClick={(event) => event.stopPropagation()}
-                        onDragStart={(event) => {
-                          event.stopPropagation();
-                          setDraggedGroup(group);
-
-                          const preview = createDragPreview(`Move group: ${group}`);
-                          event.dataTransfer.setDragImage(preview, 12, 12);
-
-                          window.setTimeout(() => {
-                            preview.remove();
-                          }, 0);
-
-                          event.dataTransfer.effectAllowed = "move";
-                          event.dataTransfer.setData("text/plain", group);
-                        }}
-                        onDragEnd={resetDragState}
                       >
                         ⠿
                       </span>
@@ -3561,6 +3641,7 @@ export default function App() {
                   return (
                     <div
                       key={channel.id}
+                      draggable
                       className={[
                         "channelRow",
                         isSelected ? "selected" : "",
@@ -3568,6 +3649,24 @@ export default function App() {
                       ]
                         .filter(Boolean)
                         .join(" ")}
+                      onDragStart={(event) => {
+                        const ids = startDraggingChannel(channel.id);
+                        const previewText =
+                          ids.length === 1
+                            ? channel.name
+                            : `Moving ${ids.length.toLocaleString()} channels`;
+
+                        const preview = createDragPreview(previewText);
+                        event.dataTransfer.setDragImage(preview, 12, 12);
+
+                        window.setTimeout(() => {
+                          preview.remove();
+                        }, 0);
+
+                        event.dataTransfer.effectAllowed = "move";
+                        event.dataTransfer.setData("text/plain", channel.id);
+                      }}
+                      onDragEnd={resetDragState}
                       onContextMenu={(event) => openChannelContextMenu(event, channel)}
                       onDoubleClick={() => {
                         setSelectedChannelIds([channel.id]);
@@ -3603,29 +3702,8 @@ export default function App() {
 
                       <span
                         className="dragDots dragHandle"
-                        draggable
                         title=""
                         onClick={(event) => event.stopPropagation()}
-                        onDragStart={(event) => {
-                          event.stopPropagation();
-
-                          const ids = startDraggingChannel(channel.id);
-                          const previewText =
-                            ids.length === 1
-                              ? channel.name
-                              : `Moving ${ids.length.toLocaleString()} channels`;
-
-                          const preview = createDragPreview(previewText);
-                          event.dataTransfer.setDragImage(preview, 12, 12);
-
-                          window.setTimeout(() => {
-                            preview.remove();
-                          }, 0);
-
-                          event.dataTransfer.effectAllowed = "move";
-                          event.dataTransfer.setData("text/plain", channel.id);
-                        }}
-                        onDragEnd={resetDragState}
                       >
                         ⠿
                       </span>
