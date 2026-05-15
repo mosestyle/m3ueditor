@@ -3073,6 +3073,20 @@ export default function App() {
         return;
       }
 
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "a") {
+        event.preventDefault();
+
+        const visibleIds = visibleChannels.map((channel) => channel.id);
+
+        setSelectedChannelIds(visibleIds);
+
+        if (visibleIds.length > 0) {
+          setLastSelectedChannelId(visibleIds[visibleIds.length - 1]);
+        }
+
+        return;
+      }
+
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z") {
         event.preventDefault();
         undoLastAction();
@@ -3125,6 +3139,7 @@ export default function App() {
     selectedChannelIds,
     selectedGroupNames,
     undoStack,
+    visibleChannels,
   ]);
 
   return (
