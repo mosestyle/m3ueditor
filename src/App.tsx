@@ -1537,6 +1537,10 @@ export default function App() {
   const canUndo = undoStack.length > 0;
   const canRedo = redoStack.length > 0;
 
+  function isMultiSelectEvent(event: ReactMouseEvent<HTMLElement>) {
+    return event.ctrlKey || event.metaKey || event.shiftKey;
+  }
+
   function makeSnapshot(): HistorySnapshot {
     return {
       channels: cloneChannels(channels),
@@ -3318,7 +3322,19 @@ export default function App() {
                       key={group}
                       className={className}
                       draggable
+                      onMouseDown={(event) => {
+                        if (isMultiSelectEvent(event)) {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          selectGroupWithEvent(group, event);
+                        }
+                      }}
                       onDragStart={(event) => {
+                        if (event.ctrlKey || event.metaKey || event.shiftKey) {
+                          event.preventDefault();
+                          return;
+                        }
+
                         const dragGroups = startDraggingGroup(group);
 
                         const previewText =
@@ -3338,14 +3354,8 @@ export default function App() {
                       }}
                       onDragEnd={resetDragState}
                       onClick={(event) => {
-                        if (event.ctrlKey || event.metaKey) {
+                        if (isMultiSelectEvent(event)) {
                           event.preventDefault();
-                          selectGroupWithEvent(group, event);
-                          return;
-                        }
-
-                        if (event.shiftKey) {
-                          selectGroupWithEvent(group, event);
                           return;
                         }
 
@@ -3656,13 +3666,24 @@ export default function App() {
                       ]
                         .filter(Boolean)
                         .join(" ")}
-                      onClick={(event) => {
-                        if (event.ctrlKey || event.metaKey || event.shiftKey) {
+                      onMouseDown={(event) => {
+                        if (isMultiSelectEvent(event)) {
                           event.preventDefault();
+                          event.stopPropagation();
                           selectChannelWithEvent(channel.id, event);
                         }
                       }}
+                      onClick={(event) => {
+                        if (isMultiSelectEvent(event)) {
+                          event.preventDefault();
+                        }
+                      }}
                       onDragStart={(event) => {
+                        if (event.ctrlKey || event.metaKey || event.shiftKey) {
+                          event.preventDefault();
+                          return;
+                        }
+
                         const ids = startDraggingChannel(channel.id);
                         const previewText =
                           ids.length === 1
