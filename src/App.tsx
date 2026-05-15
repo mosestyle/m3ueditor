@@ -1263,6 +1263,7 @@ export default function App() {
     useState("All Channels");
   const [epgTargetModalOpen, setEpgTargetModalOpen] = useState(false);
   const [selectedGroup, setSelectedGroup] = useState("All Channels");
+  const [showSelectedGroupsView, setShowSelectedGroupsView] = useState(false);
   const [selectedGroupNames, setSelectedGroupNames] = useState<string[]>([]);
   const [selectedChannelIds, setSelectedChannelIds] = useState<string[]>([]);
   const [lastSelectedChannelId, setLastSelectedChannelId] = useState("");
@@ -1452,12 +1453,17 @@ export default function App() {
     return counts;
   }, [channels]);
 
+  const channelHeaderTitle = showSelectedGroupsView
+    ? "Selected Groups"
+    : selectedGroup;
+
   const filteredChannels = useMemo(() => {
     const search = searchText.trim().toLowerCase();
 
     return channels.filter((channel) => {
-      const matchesGroup =
-        selectedGroup === "All Channels" || channel.group === selectedGroup;
+      const matchesGroup = showSelectedGroupsView
+        ? selectedGroupSet.has(channel.group)
+        : selectedGroup === "All Channels" || channel.group === selectedGroup;
 
       if (!matchesGroup) {
         return false;
@@ -1491,7 +1497,15 @@ export default function App() {
         channel.tvgLogo.toLowerCase().includes(search)
       );
     });
-  }, [channels, selectedGroup, searchText, logoFilter, brokenLogoSet]);
+  }, [
+    channels,
+    selectedGroup,
+    showSelectedGroupsView,
+    selectedGroupSet,
+    searchText,
+    logoFilter,
+    brokenLogoSet,
+  ]);
 
   const visibleChannels = filteredChannels.slice(0, 1000);
 
@@ -1569,6 +1583,7 @@ export default function App() {
     setSelectedGroup(cloned.selectedGroup);
     setEpgTargetGroup(cloned.epgTargetGroup);
 
+    setShowSelectedGroupsView(false);
     setSelectedChannelIds([]);
     setSelectedGroupNames([]);
     setLastSelectedChannelId("");
@@ -1587,7 +1602,9 @@ export default function App() {
     const currentSnapshot = makeSnapshot();
 
     setUndoStack((current) => current.slice(0, -1));
-    setRedoStack((current) => [...current, currentSnapshot].slice(-MAX_HISTORY_STEPS));
+    setRedoStack((current) =>
+      [...current, currentSnapshot].slice(-MAX_HISTORY_STEPS)
+    );
     restoreSnapshot(previous);
   }
 
@@ -1600,7 +1617,9 @@ export default function App() {
     const currentSnapshot = makeSnapshot();
 
     setRedoStack((current) => current.slice(0, -1));
-    setUndoStack((current) => [...current, currentSnapshot].slice(-MAX_HISTORY_STEPS));
+    setUndoStack((current) =>
+      [...current, currentSnapshot].slice(-MAX_HISTORY_STEPS)
+    );
     restoreSnapshot(next);
   }
 
@@ -1703,6 +1722,17 @@ export default function App() {
     setLastSelectedGroupName(groupName);
   }
 
+  function showSelectedGroupsInChannelList() {
+    if (selectedGroupNames.length === 0) {
+      return;
+    }
+
+    setShowSelectedGroupsView(true);
+    setSelectedChannelIds([]);
+    setLastSelectedChannelId("");
+    closeFloatingMenus();
+  }
+
   function showDropIndicator(
     event: DragEvent<HTMLDivElement>,
     channelId: string
@@ -1770,6 +1800,7 @@ export default function App() {
       setGroupOrder(initialGroups);
       setFileName(file.name);
       setSelectedGroup("All Channels");
+      setShowSelectedGroupsView(false);
       setEpgTargetGroup("All Channels");
       setPendingEpgTargetGroup("All Channels");
       setLogoFilter("all");
@@ -1862,6 +1893,7 @@ export default function App() {
   function toggleAllGroups() {
     if (allGroupsSelected) {
       setSelectedGroupNames([]);
+      setShowSelectedGroupsView(false);
       return;
     }
 
@@ -1887,6 +1919,7 @@ export default function App() {
   function clearSelection() {
     setSelectedChannelIds([]);
     setSelectedGroupNames([]);
+    setShowSelectedGroupsView(false);
   }
 
   function addEmptyGroup(groupName: string) {
@@ -1898,12 +1931,14 @@ export default function App() {
 
     if (groups.includes(cleanGroupName)) {
       setSelectedGroup(cleanGroupName);
+      setShowSelectedGroupsView(false);
       return;
     }
 
     pushUndoSnapshot();
     setGroupOrder((current) => [cleanGroupName, ...current]);
     setSelectedGroup(cleanGroupName);
+    setShowSelectedGroupsView(false);
     setSelectedGroupNames([cleanGroupName]);
     setLastSelectedGroupName(cleanGroupName);
   }
@@ -1953,6 +1988,7 @@ export default function App() {
     }
 
     setSelectedGroup(cleanNewName);
+    setShowSelectedGroupsView(false);
     setSelectedGroupNames([cleanNewName]);
     setLastSelectedGroupName(cleanNewName);
     setRenameGroupOpen(false);
@@ -1983,6 +2019,7 @@ export default function App() {
 
       if (groupNameSet.has(selectedGroup)) {
         setSelectedGroup("All Channels");
+        setShowSelectedGroupsView(false);
       }
 
       if (groupNameSet.has(epgTargetGroup)) {
@@ -2049,7 +2086,7 @@ export default function App() {
       return;
     }
 
-    if (selectedGroup === "All Channels") {
+    if (selectedGroup === "All Channels" && !showSelectedGroupsView) {
       const confirmed = window.confirm(
         "You are on All Channels. This will scan all channels and apply Swedish EPG IDs where it finds a match.\n\nContinue?"
       );
@@ -2059,14 +2096,25 @@ export default function App() {
       }
     }
 
-    const targetGroup = selectedGroup;
+    const targetGroups = showSelectedGroupsView ? selectedGroupNames : [];
+    const targetGroupSet = new Set(targetGroups);
+    const targetGroup = showSelectedGroupsView ? "Selected Groups" : selectedGroup;
+
     let checked = 0;
     let matched = 0;
     let changed = 0;
     let alreadyCorrect = 0;
 
     const updatedChannels = channels.map((channel) => {
-      if (targetGroup !== "All Channels" && channel.group !== targetGroup) {
+      if (showSelectedGroupsView && !targetGroupSet.has(channel.group)) {
+        return channel;
+      }
+
+      if (
+        !showSelectedGroupsView &&
+        selectedGroup !== "All Channels" &&
+        channel.group !== selectedGroup
+      ) {
         return channel;
       }
 
@@ -2323,6 +2371,7 @@ export default function App() {
     });
 
     setSelectedGroup(cleanGroupName);
+    setShowSelectedGroupsView(false);
     setSelectedChannelIds([]);
     setLastSelectedChannelId("");
     setNewGroupName("");
@@ -2376,6 +2425,7 @@ export default function App() {
     });
 
     setSelectedGroup(cleanGroupName);
+    setShowSelectedGroupsView(false);
     setSelectedChannelIds([]);
     setLastSelectedChannelId("");
     setNewGroupName("");
@@ -2404,7 +2454,7 @@ export default function App() {
       const selected = current.filter((channel) => selectedSet.has(channel.id));
       const rest = current.filter((channel) => !selectedSet.has(channel.id));
 
-      if (selectedGroup === "All Channels") {
+      if (selectedGroup === "All Channels" || showSelectedGroupsView) {
         return [...selected, ...rest];
       }
 
@@ -2439,7 +2489,7 @@ export default function App() {
       const selected = current.filter((channel) => selectedSet.has(channel.id));
       const rest = current.filter((channel) => !selectedSet.has(channel.id));
 
-      if (selectedGroup === "All Channels") {
+      if (selectedGroup === "All Channels" || showSelectedGroupsView) {
         return [...rest, ...selected];
       }
 
@@ -2770,6 +2820,7 @@ export default function App() {
     }
 
     setSelectedGroup(channel.group);
+    setShowSelectedGroupsView(false);
     setOpenMenu(null);
     setContextMenu({
       type: "channel",
@@ -2791,6 +2842,7 @@ export default function App() {
     }
 
     setSelectedGroup(group);
+    setShowSelectedGroupsView(false);
     setOpenMenu(null);
     setContextMenu({
       type: "group",
@@ -3168,6 +3220,8 @@ export default function App() {
               <strong>{fileName}</strong>
               <span>
                 {channels.length.toLocaleString()} total channels
+                {showSelectedGroupsView &&
+                  ` • Showing ${selectedGroupNames.length.toLocaleString()} selected groups`}
                 {epgChannels.length > 0 &&
                   ` • XML EPG target: ${epgTargetGroup} • ${epgStats.matched.toLocaleString()} exact • ${epgStats.possible.toLocaleString()} possible`}
                 {` • Logos: ${logoStats.withLogo.toLocaleString()} with URL • ${logoStats.missingLogo.toLocaleString()} missing`}
@@ -3242,15 +3296,26 @@ export default function App() {
                 </label>
 
                 <div className="miniButtons menuWrap">
-                  {selectedGroupNames.length > 0 && (
-                    <button
-                      className="textActionButton tooltipButton"
-                      data-tooltip="Clear selected groups"
-                      onClick={() => setSelectedGroupNames([])}
-                    >
-                      Clear
-                    </button>
-                  )}
+                  <button
+                    className="textActionButton tooltipButton"
+                    data-tooltip="Clear selected groups"
+                    disabled={selectedGroupNames.length === 0}
+                    onClick={() => {
+                      setSelectedGroupNames([]);
+                      setShowSelectedGroupsView(false);
+                    }}
+                  >
+                    Clear
+                  </button>
+
+                  <button
+                    className="textActionButton tooltipButton"
+                    data-tooltip="Show selected groups together"
+                    disabled={selectedGroupNames.length === 0}
+                    onClick={showSelectedGroupsInChannelList}
+                  >
+                    Show selected
+                  </button>
 
                   <button
                     className="iconButton tooltipButton"
@@ -3280,12 +3345,13 @@ export default function App() {
 
               <button
                 className={
-                  selectedGroup === "All Channels"
+                  selectedGroup === "All Channels" && !showSelectedGroupsView
                     ? "groupRow allChannelsRow active"
                     : "groupRow allChannelsRow"
                 }
                 onClick={() => {
                   setSelectedGroup("All Channels");
+                  setShowSelectedGroupsView(false);
                   setLastSelectedGroupName("");
                 }}
               >
@@ -3305,7 +3371,7 @@ export default function App() {
 
                   const className = [
                     "groupRow",
-                    selectedGroup === group ? "active" : "",
+                    selectedGroup === group && !showSelectedGroupsView ? "active" : "",
                     selectedGroupSet.has(group) ? "groupSelected" : "",
                     dragOverGroup === group ? "dragOver" : "",
                     draggedGroupNames.includes(group) || draggedGroup === group
@@ -3360,6 +3426,7 @@ export default function App() {
                         }
 
                         setSelectedGroup(group);
+                        setShowSelectedGroupsView(false);
                         setLastSelectedGroupName(group);
                       }}
                       onContextMenu={(event) => openGroupContextMenu(event, group)}
@@ -3436,27 +3503,41 @@ export default function App() {
                     checked={allVisibleSelected}
                     onChange={toggleAllVisible}
                   />
-                  <strong>{selectedGroup}</strong>
+                  <strong>{channelHeaderTitle}</strong>
                   <span>
                     {filteredChannels.length.toLocaleString()} channels
+                    {showSelectedGroupsView &&
+                      ` • ${selectedGroupNames.length.toLocaleString()} groups`}
                     {selectedChannelIds.length > 0 &&
                       ` • ${selectedChannelIds.length.toLocaleString()} selected`}
                   </span>
                 </label>
 
                 <div className="miniButtons menuWrap">
-                  {selectedChannelIds.length > 0 && (
-                    <button
-                      className="textActionButton tooltipButton"
-                      data-tooltip="Clear selected channels"
-                      onClick={() => {
-                        setSelectedChannelIds([]);
-                        setLastSelectedChannelId("");
-                      }}
-                    >
-                      Clear
-                    </button>
-                  )}
+                  <button
+                    className="textActionButton tooltipButton"
+                    data-tooltip={
+                      selectedChannelIds.length > 1
+                        ? "Bulk rename selected channels"
+                        : "Rename / edit selected channel"
+                    }
+                    disabled={selectedChannelIds.length === 0}
+                    onClick={openChannelEditor}
+                  >
+                    Rename
+                  </button>
+
+                  <button
+                    className="textActionButton tooltipButton"
+                    data-tooltip="Clear selected channels"
+                    disabled={selectedChannelIds.length === 0}
+                    onClick={() => {
+                      setSelectedChannelIds([]);
+                      setLastSelectedChannelId("");
+                    }}
+                  >
+                    Clear
+                  </button>
 
                   <label
                     className="textActionButton tooltipButton"
