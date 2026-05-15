@@ -1357,7 +1357,7 @@ export default function App() {
   }, [channels, selectedChannelIds]);
 
   const selectedEpgChannel = selectedLogoChannel;
-  const groupsFromChannels = useMemo(() => {
+    const groupsFromChannels = useMemo(() => {
     const seen = new Set<string>();
     const result: string[] = [];
 
@@ -3338,12 +3338,19 @@ export default function App() {
                       }}
                       onDragEnd={resetDragState}
                       onClick={(event) => {
+                        if (event.ctrlKey || event.metaKey) {
+                          event.preventDefault();
+                          selectGroupWithEvent(group, event);
+                          return;
+                        }
+
                         if (event.shiftKey) {
                           selectGroupWithEvent(group, event);
-                        } else {
-                          setSelectedGroup(group);
-                          setLastSelectedGroupName(group);
+                          return;
                         }
+
+                        setSelectedGroup(group);
+                        setLastSelectedGroupName(group);
                       }}
                       onContextMenu={(event) => openGroupContextMenu(event, group)}
                       onDragOver={(event) => {
@@ -3649,6 +3656,12 @@ export default function App() {
                       ]
                         .filter(Boolean)
                         .join(" ")}
+                      onClick={(event) => {
+                        if (event.ctrlKey || event.metaKey || event.shiftKey) {
+                          event.preventDefault();
+                          selectChannelWithEvent(channel.id, event);
+                        }
+                      }}
                       onDragStart={(event) => {
                         const ids = startDraggingChannel(channel.id);
                         const previewText =
