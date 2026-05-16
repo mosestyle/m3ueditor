@@ -1678,7 +1678,6 @@ export default function App() {
 
     try {
       await navigator.clipboard.writeText(cleanUrl);
-      window.alert("Stream URL copied.");
     } catch {
       window.prompt("Copy this stream URL:", cleanUrl);
     }
