@@ -1664,6 +1664,55 @@ export default function App() {
     );
   }
 
+  function canOpenInVlc() {
+    return Boolean(window.electronAPI?.openInVlc);
+  }
+
+  async function copyStreamUrlToClipboard(url: string) {
+    const cleanUrl = url.trim();
+
+    if (!cleanUrl) {
+      window.alert("No stream URL found.");
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(cleanUrl);
+      window.alert("Stream URL copied.");
+    } catch {
+      window.prompt("Copy this stream URL:", cleanUrl);
+    }
+  }
+
+  async function handleStreamUrlAction(url: string) {
+    const cleanUrl = url.trim();
+
+    if (!cleanUrl) {
+      window.alert("No stream URL found.");
+      return;
+    }
+
+    if (window.electronAPI?.openInVlc) {
+      try {
+        const result = await window.electronAPI.openInVlc(cleanUrl);
+
+        if (result.ok) {
+          return;
+        }
+
+        await copyStreamUrlToClipboard(cleanUrl);
+        window.alert(`${result.message}\n\nThe stream URL was copied instead.`);
+        return;
+      } catch {
+        await copyStreamUrlToClipboard(cleanUrl);
+        window.alert("Could not open VLC. The stream URL was copied instead.");
+        return;
+      }
+    }
+
+    await copyStreamUrlToClipboard(cleanUrl);
+  }
+
   function clearLastActivePanelSelection() {
     if (lastActivePanel === "channels") {
       setSelectedChannelIds([]);
@@ -4741,15 +4790,36 @@ export default function App() {
 
                   <label>
                     Stream URL
-                    <input
-                      value={channelEditForm.url}
-                      onChange={(event) =>
-                        setChannelEditForm({
-                          ...channelEditForm,
-                          url: event.target.value,
-                        })
-                      }
-                    />
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <input
+                        value={channelEditForm.url}
+                        onChange={(event) =>
+                          setChannelEditForm({
+                            ...channelEditForm,
+                            url: event.target.value,
+                          })
+                        }
+                        style={{ flex: 1 }}
+                      />
+
+                      <button
+                        type="button"
+                        onClick={() => handleStreamUrlAction(channelEditForm.url)}
+                        style={{
+                          border: "1px solid #d1d5db",
+                          background: "white",
+                          borderRadius: 10,
+                          padding: "0 12px",
+                          minWidth: 104,
+                          fontWeight: 700,
+                          color: "#111827",
+                          cursor: "pointer",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {canOpenInVlc() ? "Open in VLC" : "Copy URL"}
+                      </button>
+                    </div>
                   </label>
 
                   <label>
