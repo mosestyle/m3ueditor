@@ -7,11 +7,11 @@ import {
   Copy as CopyIcon,
   FolderInput,
   Image as ImageIcon,
-  ListFilter,
   MoreVertical,
   Plus,
   Trash2,
   Type,
+  Upload,
   X,
 } from "lucide-react";
 import "./App.css";
@@ -110,6 +110,8 @@ type HistorySnapshot = {
   selectedGroup: string;
   epgTargetGroup: string;
 };
+
+type ActivePanel = "groups" | "channels";
 
 const MAX_HISTORY_STEPS = 50;
 
@@ -1268,6 +1270,8 @@ export default function App() {
   const [selectedChannelIds, setSelectedChannelIds] = useState<string[]>([]);
   const [lastSelectedChannelId, setLastSelectedChannelId] = useState("");
   const [lastSelectedGroupName, setLastSelectedGroupName] = useState("");
+  const [lastActivePanel, setLastActivePanel] =
+    useState<ActivePanel>("channels");
   const [contextMenu, setContextMenu] = useState<ContextMenuState>(null);
   const [searchText, setSearchText] = useState("");
   const [logoFilter, setLogoFilter] = useState<LogoFilter>("all");
@@ -1312,6 +1316,7 @@ export default function App() {
   const channelListRef = useRef<HTMLDivElement | null>(null);
   const dropIndicatorRef = useRef<HTMLDivElement | null>(null);
   const currentDropTargetRef = useRef<DropTarget | null>(null);
+  const importGroupInputRef = useRef<HTMLInputElement | null>(null);
 
   const brokenLogoSet = useMemo(() => {
     return new Set(brokenLogoIds);
@@ -1628,6 +1633,49 @@ export default function App() {
     setContextMenu(null);
   }
 
+  function closeModals() {
+    setGroupPickerMode(null);
+    setGroupPickerSearch("");
+    setRenameGroupOpen(false);
+    setRenameGroupValue("");
+    setChannelEditOpen(false);
+    setChannelEditForm(null);
+    setLogoPreviewOpen(false);
+    setEpgModalOpen(false);
+    setDeleteConfirm(null);
+    setBulkRenameOpen(false);
+    setEpgTargetModalOpen(false);
+    setContextMenu(null);
+    setOpenMenu(null);
+  }
+
+  function hasOpenModalOrMenu() {
+    return Boolean(
+      groupPickerMode ||
+        renameGroupOpen ||
+        channelEditOpen ||
+        logoPreviewOpen ||
+        epgModalOpen ||
+        epgTargetModalOpen ||
+        deleteConfirm ||
+        bulkRenameOpen ||
+        contextMenu ||
+        openMenu
+    );
+  }
+
+  function clearLastActivePanelSelection() {
+    if (lastActivePanel === "channels") {
+      setSelectedChannelIds([]);
+      setLastSelectedChannelId("");
+      return;
+    }
+
+    setSelectedGroupNames([]);
+    setShowSelectedGroupsView(false);
+    setLastSelectedGroupName("");
+  }
+
   function markLogoStatus(channelId: string, status: LogoStatus) {
     setBrokenLogoIds((current) => {
       const exists = current.includes(channelId);
@@ -1652,6 +1700,8 @@ export default function App() {
     channelId: string,
     event?: ReactMouseEvent<HTMLElement>
   ) {
+    setLastActivePanel("channels");
+
     if (event?.shiftKey && lastSelectedChannelId) {
       const startIndex = visibleChannels.findIndex(
         (channel) => channel.id === lastSelectedChannelId
@@ -1692,6 +1742,8 @@ export default function App() {
     groupName: string,
     event?: ReactMouseEvent<HTMLElement>
   ) {
+    setLastActivePanel("groups");
+
     if (event?.shiftKey && lastSelectedGroupName) {
       const startIndex = groups.indexOf(lastSelectedGroupName);
       const endIndex = groups.indexOf(groupName);
@@ -1723,6 +1775,8 @@ export default function App() {
   }
 
   function showSelectedGroupsInChannelList() {
+    setLastActivePanel("groups");
+
     if (selectedGroupNames.length === 0) {
       return;
     }
@@ -1809,6 +1863,7 @@ export default function App() {
       setSelectedChannelIds([]);
       setLastSelectedChannelId("");
       setLastSelectedGroupName("");
+      setLastActivePanel("channels");
       setSearchText("");
       setNewGroupName("");
       setLogoPreviewOpen(false);
@@ -1819,6 +1874,54 @@ export default function App() {
       setUndoStack([]);
       setRedoStack([]);
       resetDragState();
+    };
+
+    reader.readAsText(file);
+  }
+
+  function importGroupFile(file: File) {
+    const reader = new FileReader();
+
+    reader.onload = () => {
+      const text = String(reader.result || "");
+      const importedChannels = parseM3U(text);
+
+      if (importedChannels.length === 0) {
+        window.alert("No channels found in the imported M3U file.");
+        return;
+      }
+
+      const importedGroups = getInitialGroups(importedChannels);
+
+      pushUndoSnapshot();
+
+      setChannels((current) => [...importedChannels, ...current]);
+
+      setGroupOrder((current) => {
+        const withoutImported = current.filter(
+          (group) => !importedGroups.includes(group)
+        );
+
+        return [...importedGroups, ...withoutImported];
+      });
+
+      const firstImportedGroup = importedGroups[0] || "All Channels";
+
+      setSelectedGroup(firstImportedGroup);
+      setShowSelectedGroupsView(false);
+      setSelectedGroupNames(importedGroups);
+      setLastSelectedGroupName(firstImportedGroup);
+      setSelectedChannelIds([]);
+      setLastSelectedChannelId("");
+      setLastActivePanel("groups");
+      closeFloatingMenus();
+
+      window.alert(
+        `Group import complete.\n\n` +
+          `Imported channels: ${importedChannels.length.toLocaleString()}\n` +
+          `Imported groups: ${importedGroups.length.toLocaleString()}\n\n` +
+          `Imported group(s) were placed at the top.`
+      );
     };
 
     reader.readAsText(file);
@@ -1891,6 +1994,8 @@ export default function App() {
   }
 
   function toggleAllGroups() {
+    setLastActivePanel("groups");
+
     if (allGroupsSelected) {
       setSelectedGroupNames([]);
       setShowSelectedGroupsView(false);
@@ -1901,6 +2006,8 @@ export default function App() {
   }
 
   function toggleAllVisible() {
+    setLastActivePanel("channels");
+
     const visibleIds = visibleChannels.map((channel) => channel.id);
 
     if (allVisibleSelected) {
@@ -1941,6 +2048,7 @@ export default function App() {
     setShowSelectedGroupsView(false);
     setSelectedGroupNames([cleanGroupName]);
     setLastSelectedGroupName(cleanGroupName);
+    setLastActivePanel("groups");
   }
 
   function addGroupFromButton() {
@@ -1991,6 +2099,7 @@ export default function App() {
     setShowSelectedGroupsView(false);
     setSelectedGroupNames([cleanNewName]);
     setLastSelectedGroupName(cleanNewName);
+    setLastActivePanel("groups");
     setRenameGroupOpen(false);
     setRenameGroupValue("");
   }
@@ -2255,6 +2364,7 @@ export default function App() {
       return;
     }
 
+    setLastActivePanel("channels");
     closeFloatingMenus();
     setBulkRenameOpen(true);
   }
@@ -2319,6 +2429,7 @@ export default function App() {
     const nextOrder = moveSelectedGroupsToTop(groups, groupNames);
     setGroupOrder(nextOrder);
     setChannels((current) => reorderChannelsByGroupOrder(current, nextOrder));
+    setLastActivePanel("groups");
     closeFloatingMenus();
   }
 
@@ -2331,6 +2442,7 @@ export default function App() {
     const nextOrder = moveSelectedGroupsToBottom(groups, groupNames);
     setGroupOrder(nextOrder);
     setChannels((current) => reorderChannelsByGroupOrder(current, nextOrder));
+    setLastActivePanel("groups");
     closeFloatingMenus();
   }
 
@@ -2374,6 +2486,7 @@ export default function App() {
     setShowSelectedGroupsView(false);
     setSelectedChannelIds([]);
     setLastSelectedChannelId("");
+    setLastActivePanel("channels");
     setNewGroupName("");
     setGroupPickerMode(null);
     resetDragState();
@@ -2428,6 +2541,7 @@ export default function App() {
     setShowSelectedGroupsView(false);
     setSelectedChannelIds([]);
     setLastSelectedChannelId("");
+    setLastActivePanel("channels");
     setNewGroupName("");
     setGroupPickerMode(null);
     resetDragState();
@@ -2473,6 +2587,7 @@ export default function App() {
       ];
     });
 
+    setLastActivePanel("channels");
     closeFloatingMenus();
   }
 
@@ -2508,6 +2623,7 @@ export default function App() {
       ];
     });
 
+    setLastActivePanel("channels");
     closeFloatingMenus();
   }
 
@@ -2515,6 +2631,8 @@ export default function App() {
     if (selectedChannelIds.length === 0) {
       return;
     }
+
+    setLastActivePanel("channels");
 
     if (selectedChannelIds.length > 1) {
       openBulkRename();
@@ -2609,6 +2727,7 @@ export default function App() {
       return;
     }
 
+    setLastActivePanel("channels");
     setLogoPreviewOpen(true);
   }
 
@@ -2622,6 +2741,7 @@ export default function App() {
       (channel) => channel.id === selectedChannelIds[0]
     );
 
+    setLastActivePanel("channels");
     setEpgSearch(
       selectedChannel?.tvgName ||
         selectedChannel?.name ||
@@ -2677,6 +2797,8 @@ export default function App() {
   }
 
   function startDraggingChannel(channelId: string) {
+    setLastActivePanel("channels");
+
     if (selectedChannelSet.has(channelId)) {
       setDraggedChannelIds(selectedChannelIds);
       return selectedChannelIds;
@@ -2687,6 +2809,8 @@ export default function App() {
   }
 
   function startDraggingGroup(group: string) {
+    setLastActivePanel("groups");
+
     const dragGroups = selectedGroupSet.has(group)
       ? selectedGroupNames
       : [group];
@@ -2724,6 +2848,7 @@ export default function App() {
       )
     );
 
+    setLastActivePanel("channels");
     resetDragState();
   }
 
@@ -2744,6 +2869,7 @@ export default function App() {
 
       setGroupOrder(nextOrder);
       setChannels((current) => reorderChannelsByGroupOrder(current, nextOrder));
+      setLastActivePanel("groups");
       resetDragState();
       return;
     }
@@ -2760,6 +2886,7 @@ export default function App() {
 
       setGroupOrder(nextOrder);
       setChannels((current) => reorderChannelsByGroupOrder(current, nextOrder));
+      setLastActivePanel("groups");
       resetDragState();
       return;
     }
@@ -2787,24 +2914,10 @@ export default function App() {
       return;
     }
 
+    setLastActivePanel("groups");
     setRenameGroupValue(target);
     setRenameGroupOpen(true);
     closeFloatingMenus();
-  }
-
-  function closeModals() {
-    setGroupPickerMode(null);
-    setGroupPickerSearch("");
-    setRenameGroupOpen(false);
-    setRenameGroupValue("");
-    setChannelEditOpen(false);
-    setChannelEditForm(null);
-    setLogoPreviewOpen(false);
-    setEpgModalOpen(false);
-    setDeleteConfirm(null);
-    setBulkRenameOpen(false);
-    setEpgTargetModalOpen(false);
-    setContextMenu(null);
   }
 
   function openChannelContextMenu(
@@ -2813,6 +2926,8 @@ export default function App() {
   ) {
     event.preventDefault();
     event.stopPropagation();
+
+    setLastActivePanel("channels");
 
     if (!selectedChannelSet.has(channel.id)) {
       setSelectedChannelIds([channel.id]);
@@ -2835,6 +2950,8 @@ export default function App() {
   ) {
     event.preventDefault();
     event.stopPropagation();
+
+    setLastActivePanel("groups");
 
     if (!selectedGroupSet.has(group)) {
       setSelectedGroupNames([group]);
@@ -2870,16 +2987,6 @@ export default function App() {
               <span>Apply Swedish EPG IDs</span>
             </button>
 
-            <button
-              disabled={epgChannels.length === 0}
-              onClick={applySmartEpgMatches}
-            >
-              <span className="menuIcon">
-                <CheckCircle2 size={23} strokeWidth={2.5} />
-              </span>
-              <span>Apply XML EPG / Logo matches</span>
-            </button>
-
             <hr />
           </>
         )}
@@ -2901,6 +3008,7 @@ export default function App() {
         <button
           disabled={selectedChannelIds.length === 0}
           onClick={() => {
+            setLastActivePanel("channels");
             setGroupPickerMode("move");
             closeFloatingMenus();
           }}
@@ -2914,6 +3022,7 @@ export default function App() {
         <button
           disabled={selectedChannelIds.length === 0}
           onClick={() => {
+            setLastActivePanel("channels");
             setGroupPickerMode("copy");
             closeFloatingMenus();
           }}
@@ -2922,6 +3031,19 @@ export default function App() {
             <CopyIcon size={23} strokeWidth={2.5} />
           </span>
           <span>Copy to group...</span>
+        </button>
+
+        <button
+          disabled={selectedChannelIds.length !== 1}
+          onClick={() => {
+            closeFloatingMenus();
+            openLogoPreview();
+          }}
+        >
+          <span className="menuIcon">
+            <ImageIcon size={23} strokeWidth={2.5} />
+          </span>
+          <span>Logo preview...</span>
         </button>
 
         <hr />
@@ -3003,6 +3125,18 @@ export default function App() {
         <hr />
 
         <button
+          onClick={() => {
+            closeFloatingMenus();
+            importGroupInputRef.current?.click();
+          }}
+        >
+          <span className="menuIcon">
+            <Upload size={22} strokeWidth={2.5} />
+          </span>
+          <span>Import group</span>
+        </button>
+
+        <button
           disabled={!canExportGroups}
           onClick={() => exportGroups(groupActionTargets)}
         >
@@ -3041,7 +3175,9 @@ export default function App() {
 
   useEffect(() => {
     function handleKeyboard(event: KeyboardEvent) {
-      if (isTypingTarget(event.target)) {
+      const isEscape = event.key === "Escape";
+
+      if (isTypingTarget(event.target) && !isEscape) {
         return;
       }
 
@@ -3059,6 +3195,18 @@ export default function App() {
         }
       }
 
+      if (event.key === "Escape") {
+        event.preventDefault();
+
+        if (hasOpenModalOrMenu()) {
+          closeModals();
+          return;
+        }
+
+        clearLastActivePanelSelection();
+        return;
+      }
+
       const anyModalOpen =
         groupPickerMode ||
         renameGroupOpen ||
@@ -3066,7 +3214,6 @@ export default function App() {
         logoPreviewOpen ||
         epgModalOpen ||
         epgTargetModalOpen ||
-        deleteConfirm ||
         bulkRenameOpen;
 
       if (anyModalOpen) {
@@ -3075,6 +3222,8 @@ export default function App() {
 
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "a") {
         event.preventDefault();
+
+        setLastActivePanel("channels");
 
         const visibleIds = visibleChannels.map((channel) => channel.id);
 
@@ -3103,11 +3252,6 @@ export default function App() {
         return;
       }
 
-      if (event.key === "Escape") {
-        closeFloatingMenus();
-        return;
-      }
-
       if (event.key === "Delete") {
         const hasSelectedChannels = selectedChannelIds.length > 0;
         const hasSelectedGroups = selectedGroupNames.length > 0;
@@ -3129,11 +3273,14 @@ export default function App() {
   }, [
     bulkRenameOpen,
     channelEditOpen,
+    contextMenu,
     deleteConfirm,
     epgModalOpen,
     epgTargetModalOpen,
     groupPickerMode,
+    lastActivePanel,
     logoPreviewOpen,
+    openMenu,
     redoStack,
     renameGroupOpen,
     selectedChannelIds,
@@ -3154,6 +3301,20 @@ export default function App() {
         }
       }}
     >
+      <input
+        ref={importGroupInputRef}
+        type="file"
+        accept=".m3u,.m3u8,text/plain"
+        style={{ display: "none" }}
+        onChange={(event) => {
+          const file = event.target.files?.[0];
+          if (file) {
+            importGroupFile(file);
+          }
+          event.target.value = "";
+        }}
+      />
+
       <header className="topBar">
         <div className="brand">
           <div className="logoMark">M</div>
@@ -3294,7 +3455,10 @@ export default function App() {
           </section>
 
           <section className="editorLayout">
-            <aside className="groupsPanel">
+            <aside
+              className="groupsPanel"
+              onMouseDown={() => setLastActivePanel("groups")}
+            >
               <div className="panelHeader">
                 <label>
                   <input
@@ -3316,6 +3480,7 @@ export default function App() {
                     data-tooltip="Clear selected groups"
                     disabled={selectedGroupNames.length === 0}
                     onClick={() => {
+                      setLastActivePanel("groups");
                       setSelectedGroupNames([]);
                       setShowSelectedGroupsView(false);
                     }}
@@ -3347,6 +3512,7 @@ export default function App() {
                     title=""
                     onClick={(event) => {
                       event.stopPropagation();
+                      setLastActivePanel("groups");
                       setContextMenu(null);
                       setOpenMenu(openMenu === "group" ? null : "group");
                     }}
@@ -3365,6 +3531,7 @@ export default function App() {
                     : "groupRow allChannelsRow"
                 }
                 onClick={() => {
+                  setLastActivePanel("groups");
                   setSelectedGroup("All Channels");
                   setShowSelectedGroupsView(false);
                   setLastSelectedGroupName("");
@@ -3404,6 +3571,8 @@ export default function App() {
                       className={className}
                       draggable
                       onMouseDown={(event) => {
+                        setLastActivePanel("groups");
+
                         if (isMultiSelectEvent(event)) {
                           event.preventDefault();
                           event.stopPropagation();
@@ -3435,6 +3604,8 @@ export default function App() {
                       }}
                       onDragEnd={resetDragState}
                       onClick={(event) => {
+                        setLastActivePanel("groups");
+
                         if (isMultiSelectEvent(event)) {
                           event.preventDefault();
                           return;
@@ -3510,7 +3681,10 @@ export default function App() {
               </div>
             </aside>
 
-            <section className="channelsPanel">
+            <section
+              className="channelsPanel"
+              onMouseDown={() => setLastActivePanel("channels")}
+            >
               <div className="panelHeader channelHeader">
                 <label>
                   <input
@@ -3529,6 +3703,16 @@ export default function App() {
                 </label>
 
                 <div className="miniButtons menuWrap">
+                  {epgChannels.length > 0 && (
+                    <button
+                      className="textActionButton tooltipButton"
+                      data-tooltip="Apply XML EPG / Logo matches"
+                      onClick={applySmartEpgMatches}
+                    >
+                      Apply XML
+                    </button>
+                  )}
+
                   <button
                     className="textActionButton tooltipButton"
                     data-tooltip={
@@ -3547,6 +3731,7 @@ export default function App() {
                     data-tooltip="Clear selected channels"
                     disabled={selectedChannelIds.length === 0}
                     onClick={() => {
+                      setLastActivePanel("channels");
                       setSelectedChannelIds([]);
                       setLastSelectedChannelId("");
                     }}
@@ -3596,36 +3781,11 @@ export default function App() {
                   </button>
 
                   <button
-                    className="iconButton tooltipButton"
-                    data-tooltip="Logo preview"
-                    disabled={selectedChannelIds.length !== 1}
-                    onClick={openLogoPreview}
-                  >
-                    <ImageIcon size={21} strokeWidth={2.3} />
-                  </button>
-
-                  <button
-                    className="iconButton tooltipButton"
-                    data-tooltip="Add channel"
-                    disabled
-                  >
-                    <Plus size={22} strokeWidth={2.5} />
-                  </button>
-
-                  <button
-                    className="iconButton tooltipButton"
-                    data-tooltip="Bulk rename"
-                    disabled={selectedChannelIds.length === 0}
-                    onClick={openBulkRename}
-                  >
-                    <ListFilter size={22} strokeWidth={2.5} />
-                  </button>
-
-                  <button
                     disabled={selectedChannelIds.length === 0}
                     className="textActionButton tooltipButton"
                     data-tooltip="Copy selected to group"
                     onClick={() => {
+                      setLastActivePanel("channels");
                       setGroupPickerMode("copy");
                       closeFloatingMenus();
                     }}
@@ -3638,6 +3798,7 @@ export default function App() {
                     className="textActionButton tooltipButton"
                     data-tooltip="Move selected to group"
                     onClick={() => {
+                      setLastActivePanel("channels");
                       setGroupPickerMode("move");
                       closeFloatingMenus();
                     }}
@@ -3651,6 +3812,7 @@ export default function App() {
                     title=""
                     onClick={(event) => {
                       event.stopPropagation();
+                      setLastActivePanel("channels");
                       setContextMenu(null);
                       setOpenMenu(openMenu === "channel" ? null : "channel");
                     }}
@@ -3763,6 +3925,8 @@ export default function App() {
                         .filter(Boolean)
                         .join(" ")}
                       onMouseDown={(event) => {
+                        setLastActivePanel("channels");
+
                         if (isMultiSelectEvent(event)) {
                           event.preventDefault();
                           event.stopPropagation();
@@ -3770,6 +3934,8 @@ export default function App() {
                         }
                       }}
                       onClick={(event) => {
+                        setLastActivePanel("channels");
+
                         if (isMultiSelectEvent(event)) {
                           event.preventDefault();
                         }
@@ -3799,6 +3965,7 @@ export default function App() {
                       onDragEnd={resetDragState}
                       onContextMenu={(event) => openChannelContextMenu(event, channel)}
                       onDoubleClick={() => {
+                        setLastActivePanel("channels");
                         setSelectedChannelIds([channel.id]);
                         setLastSelectedChannelId(channel.id);
                         setChannelEditForm({
@@ -3944,7 +4111,7 @@ export default function App() {
             })}
 
           {epgTargetModalOpen && pendingEpgFile && (
-            <div className="modalBackdrop" onClick={cancelPendingEpgImport}>
+            <div className="modalBackdrop" onClick={closeModals}>
               <div
                 className="smallModal"
                 onClick={(event) => event.stopPropagation()}
