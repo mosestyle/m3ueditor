@@ -182,7 +182,6 @@ const SWEDISH_EPG_CODES: BuiltInEpgCode[] = [
   { name: "TV6 HD", code: "TV6.se" },
   { name: "TV8", code: "TV8.se" },
   { name: "TVE", code: "TVE.se" },
-
   { name: "V Film Action", code: "ViasatFilmAction.se" },
   { name: "V Film Family", code: "ViasatFilmFamily.se" },
   { name: "V Film Hits", code: "ViasatFilmHits.se" },
@@ -198,7 +197,6 @@ const SWEDISH_EPG_CODES: BuiltInEpgCode[] = [
   { name: "V Sport Premium HD", code: "ViasatSportPremium.se" },
   { name: "V Sport Premium FHD", code: "ViasatSportPremium.se" },
   { name: "Viasat Explore", code: "ViasatExplore.se" },
-
   { name: "V Sport Extra HD", code: "ViasatSportExtra.se" },
   { name: "V Sport Vinter", code: "ViasatSportVinter.se" },
   { name: "Viasat Explorer", code: "ViasatExplore.se" },
@@ -318,16 +316,12 @@ function cleanNameForEpg(value: string) {
   let text = normalizeText(value);
 
   text = decodeXmlEntities(text);
-
   text = text.replace(/^[a-z]{2,5}\s*:\s*/i, "");
-
   text = text.replace(/\[[^\]]*\]/g, " ");
   text = text.replace(/\([^)]*\)/g, " ");
   text = text.replace(/\{[^}]*\}/g, " ");
-
   text = text.replace(/(\d)\s*(fhd|fullhd|full hd|uhd|hd|sd|4k|8k)\b/gi, "$1 ");
   text = text.replace(/([a-zåäö])\s*(fhd|fullhd|full hd|uhd|hd|sd|4k|8k)\b/gi, "$1 ");
-
   text = text.replace(/([a-zåäö])(\d)/gi, "$1 $2");
   text = text.replace(/(\d)([a-zåäö])/gi, "$1 $2");
 
@@ -353,7 +347,6 @@ function cleanNameForEpg(value: string) {
 
   text = text.replace(/[|•_\-–—]+/g, " ");
   text = text.replace(/[^\p{L}\p{N}&+ ]+/gu, " ");
-
   text = text.replace(/\s+/g, " ").trim();
 
   return text;
@@ -542,8 +535,7 @@ async function readEpgChannelsFromFile(
   }
 
   return epgChannels;
-}
-function buildEpgIndexes(epgChannels: EpgChannel[]): EpgIndexes {
+}function buildEpgIndexes(epgChannels: EpgChannel[]): EpgIndexes {
   const byId = new Map<string, EpgChannel>();
   const byExactName = new Map<string, EpgChannel[]>();
   const byCleanName = new Map<string, EpgChannel[]>();
@@ -1252,7 +1244,6 @@ function getIdBadgeStyle(channel: Channel) {
     title: "No tvg-id found",
   };
 }
-
 export default function App() {
   const [channels, setChannels] = useState<Channel[]>([]);
   const [groupOrder, setGroupOrder] = useState<string[]>([]);
@@ -1363,7 +1354,8 @@ export default function App() {
   }, [channels, selectedChannelIds]);
 
   const selectedEpgChannel = selectedLogoChannel;
-    const groupsFromChannels = useMemo(() => {
+
+  const groupsFromChannels = useMemo(() => {
     const seen = new Set<string>();
     const result: string[] = [];
 
@@ -1664,54 +1656,6 @@ export default function App() {
     );
   }
 
-  function canOpenInVlc() {
-    return Boolean(window.electronAPI?.openInVlc);
-  }
-
-  async function copyStreamUrlToClipboard(url: string) {
-    const cleanUrl = url.trim();
-
-    if (!cleanUrl) {
-      window.alert("No stream URL found.");
-      return;
-    }
-
-    try {
-      await navigator.clipboard.writeText(cleanUrl);
-    } catch {
-      window.prompt("Copy this stream URL:", cleanUrl);
-    }
-  }
-
-  async function handleStreamUrlAction(url: string) {
-    const cleanUrl = url.trim();
-
-    if (!cleanUrl) {
-      window.alert("No stream URL found.");
-      return;
-    }
-
-    if (window.electronAPI?.openInVlc) {
-      try {
-        const result = await window.electronAPI.openInVlc(cleanUrl);
-
-        if (result.ok) {
-          return;
-        }
-
-        await copyStreamUrlToClipboard(cleanUrl);
-        window.alert(`${result.message}\n\nThe stream URL was copied instead.`);
-        return;
-      } catch {
-        await copyStreamUrlToClipboard(cleanUrl);
-        window.alert("Could not open VLC. The stream URL was copied instead.");
-        return;
-      }
-    }
-
-    await copyStreamUrlToClipboard(cleanUrl);
-  }
-
   function clearLastActivePanelSelection() {
     if (lastActivePanel === "channels") {
       setSelectedChannelIds([]);
@@ -1974,8 +1918,7 @@ export default function App() {
 
     reader.readAsText(file);
   }
-
-  function chooseEpgFile(file: File) {
+    function chooseEpgFile(file: File) {
     setPendingEpgFile(file);
     setPendingEpgTargetGroup(selectedGroup || "All Channels");
     setEpgTargetModalOpen(true);
@@ -2530,8 +2473,6 @@ export default function App() {
       );
     });
 
-    setSelectedGroup(cleanGroupName);
-    setShowSelectedGroupsView(false);
     setSelectedChannelIds([]);
     setLastSelectedChannelId("");
     setLastActivePanel("channels");
@@ -2585,8 +2526,6 @@ export default function App() {
       );
     });
 
-    setSelectedGroup(cleanGroupName);
-    setShowSelectedGroupsView(false);
     setSelectedChannelIds([]);
     setLastSelectedChannelId("");
     setLastActivePanel("channels");
@@ -2706,6 +2645,25 @@ export default function App() {
 
     setChannelEditOpen(true);
     closeFloatingMenus();
+  }
+
+  async function handleStreamButtonClick() {
+    if (!channelEditForm?.url) {
+      return;
+    }
+
+    if (window.electronAPI?.openInVlc) {
+      const result = await window.electronAPI.openInVlc(channelEditForm.url);
+
+      if (!result.ok) {
+        await navigator.clipboard.writeText(channelEditForm.url);
+        window.alert(result.message);
+      }
+
+      return;
+    }
+
+    await navigator.clipboard.writeText(channelEditForm.url);
   }
 
   function saveChannelEdit() {
@@ -3015,8 +2973,7 @@ export default function App() {
       y: event.clientY,
     });
   }
-
-  function renderChannelMenu(
+    function renderChannelMenu(
     style?: React.CSSProperties,
     showEpgTools = true
   ) {
@@ -4803,20 +4760,22 @@ export default function App() {
 
                       <button
                         type="button"
-                        onClick={() => handleStreamUrlAction(channelEditForm.url)}
+                        onClick={handleStreamButtonClick}
                         style={{
                           border: "1px solid #d1d5db",
                           background: "white",
                           borderRadius: 10,
                           padding: "0 12px",
-                          minWidth: 104,
-                          fontWeight: 700,
-                          color: "#111827",
+                          display: "grid",
+                          placeItems: "center",
                           cursor: "pointer",
                           whiteSpace: "nowrap",
+                          fontWeight: 700,
                         }}
                       >
-                        {canOpenInVlc() ? "Open in VLC" : "Copy URL"}
+                        {window.electronAPI?.openInVlc
+                          ? "Open in VLC"
+                          : "Copy URL"}
                       </button>
                     </div>
                   </label>
