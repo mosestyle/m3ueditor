@@ -535,7 +535,8 @@ async function readEpgChannelsFromFile(
   }
 
   return epgChannels;
-}function buildEpgIndexes(epgChannels: EpgChannel[]): EpgIndexes {
+}
+function buildEpgIndexes(epgChannels: EpgChannel[]): EpgIndexes {
   const byId = new Map<string, EpgChannel>();
   const byExactName = new Map<string, EpgChannel[]>();
   const byCleanName = new Map<string, EpgChannel[]>();
@@ -1268,6 +1269,8 @@ export default function App() {
   const [logoFilter, setLogoFilter] = useState<LogoFilter>("all");
   const [brokenLogoIds, setBrokenLogoIds] = useState<string[]>([]);
   const [newGroupName, setNewGroupName] = useState("");
+  const [newGroupModalOpen, setNewGroupModalOpen] = useState(false);
+  const [newGroupModalValue, setNewGroupModalValue] = useState("");
   const [draggedChannelIds, setDraggedChannelIds] = useState<string[]>([]);
   const [dragOverGroup, setDragOverGroup] = useState("");
   const [draggedGroup, setDraggedGroup] = useState("");
@@ -1637,6 +1640,8 @@ export default function App() {
     setDeleteConfirm(null);
     setBulkRenameOpen(false);
     setEpgTargetModalOpen(false);
+    setNewGroupModalOpen(false);
+    setNewGroupModalValue("");
     setContextMenu(null);
     setOpenMenu(null);
   }
@@ -1651,6 +1656,7 @@ export default function App() {
         epgTargetModalOpen ||
         deleteConfirm ||
         bulkRenameOpen ||
+        newGroupModalOpen ||
         contextMenu ||
         openMenu
     );
@@ -1858,6 +1864,8 @@ export default function App() {
       setLastActivePanel("channels");
       setSearchText("");
       setNewGroupName("");
+      setNewGroupModalOpen(false);
+      setNewGroupModalValue("");
       setLogoPreviewOpen(false);
       setEpgModalOpen(false);
       setDeleteConfirm(null);
@@ -2030,6 +2038,11 @@ export default function App() {
     if (groups.includes(cleanGroupName)) {
       setSelectedGroup(cleanGroupName);
       setShowSelectedGroupsView(false);
+      setSelectedGroupNames([cleanGroupName]);
+      setLastSelectedGroupName(cleanGroupName);
+      setLastActivePanel("groups");
+      setNewGroupModalOpen(false);
+      setNewGroupModalValue("");
       return;
     }
 
@@ -2040,16 +2053,29 @@ export default function App() {
     setSelectedGroupNames([cleanGroupName]);
     setLastSelectedGroupName(cleanGroupName);
     setLastActivePanel("groups");
+    setNewGroupModalOpen(false);
+    setNewGroupModalValue("");
   }
 
-  function addGroupFromButton() {
-    const groupName = window.prompt("New group name:");
+  function openNewGroupModal() {
+    setLastActivePanel("groups");
+    setNewGroupModalValue("");
+    setNewGroupModalOpen(true);
+    closeFloatingMenus();
+  }
 
-    if (!groupName) {
+  function createGroupFromModal() {
+    const cleanGroupName = newGroupModalValue.trim();
+
+    if (!cleanGroupName) {
       return;
     }
 
-    addEmptyGroup(groupName);
+    addEmptyGroup(cleanGroupName);
+  }
+
+  function addGroupFromButton() {
+    openNewGroupModal();
   }
 
   function renameGroup(oldGroupName: string, newGroupNameValue: string) {
@@ -2972,8 +2998,7 @@ export default function App() {
       x: event.clientX,
       y: event.clientY,
     });
-  }
-    function renderChannelMenu(
+  }  function renderChannelMenu(
     style?: React.CSSProperties,
     showEpgTools = true
   ) {
@@ -3186,6 +3211,21 @@ export default function App() {
         return;
       }
 
+      if (newGroupModalOpen) {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          createGroupFromModal();
+          return;
+        }
+
+        if (event.key === "Escape") {
+          event.preventDefault();
+          setNewGroupModalOpen(false);
+          setNewGroupModalValue("");
+          return;
+        }
+      }
+
       if (deleteConfirm) {
         if (event.key === "Enter") {
           event.preventDefault();
@@ -3219,7 +3259,8 @@ export default function App() {
         logoPreviewOpen ||
         epgModalOpen ||
         epgTargetModalOpen ||
-        bulkRenameOpen;
+        bulkRenameOpen ||
+        newGroupModalOpen;
 
       if (anyModalOpen) {
         return;
@@ -3285,6 +3326,8 @@ export default function App() {
     groupPickerMode,
     lastActivePanel,
     logoPreviewOpen,
+    newGroupModalOpen,
+    newGroupModalValue,
     openMenu,
     redoStack,
     renameGroupOpen,
@@ -4114,6 +4157,46 @@ export default function App() {
               top: Math.min(contextMenu.y, window.innerHeight - 430),
               zIndex: 9999,
             })}
+
+          {newGroupModalOpen && (
+            <div className="modalBackdrop" onClick={closeModals}>
+              <div
+                className="smallModal"
+                onClick={(event) => event.stopPropagation()}
+              >
+                <h2>Create new group</h2>
+
+                <input
+                  autoFocus
+                  value={newGroupModalValue}
+                  onChange={(event) => setNewGroupModalValue(event.target.value)}
+                  placeholder="Group name..."
+                />
+
+                <div
+                  style={{
+                    color: "#6b7280",
+                    fontSize: 13,
+                    marginTop: 10,
+                    lineHeight: 1.5,
+                  }}
+                >
+                  Press Enter to create, or Esc to cancel.
+                </div>
+
+                <div className="modalFooter">
+                  <button onClick={closeModals}>Cancel</button>
+                  <button
+                    className="confirmButton"
+                    disabled={!newGroupModalValue.trim()}
+                    onClick={createGroupFromModal}
+                  >
+                    Create
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
 
           {epgTargetModalOpen && pendingEpgFile && (
             <div className="modalBackdrop" onClick={closeModals}>
