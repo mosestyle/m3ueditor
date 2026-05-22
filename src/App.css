@@ -180,12 +180,15 @@ select:disabled {
   padding: 12px 18px;
 }
 
+/* CHANGED:
+   This now uses the same left width as .editorLayout,
+   so Search all channels starts exactly where the Channels panel starts. */
 .playlistStrip {
   height: 58px;
   background: white;
   border-bottom: 1px solid #d1d5db;
   display: grid;
-  grid-template-columns: 340px 1fr;
+  grid-template-columns: clamp(280px, 27vw, 420px) minmax(0, 1fr);
   align-items: center;
   gap: 14px;
   padding: 8px 16px;
@@ -229,6 +232,8 @@ select:disabled {
   flex: 0 0 auto;
 }
 
+/* IMPORTANT:
+   Keep this exactly matching .playlistStrip grid-template-columns. */
 .editorLayout {
   height: calc(100vh - 114px);
   display: grid;
