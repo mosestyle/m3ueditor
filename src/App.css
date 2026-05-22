@@ -232,7 +232,7 @@ select:disabled {
 .editorLayout {
   height: calc(100vh - 114px);
   display: grid;
-  grid-template-columns: 34% 66%;
+  grid-template-columns: clamp(280px, 27vw, 420px) minmax(0, 1fr);
   width: 100%;
   min-width: 0;
 }
@@ -601,7 +601,7 @@ select:disabled {
 .tableHeader {
   height: 34px;
   display: grid;
-  grid-template-columns: 38px 34px minmax(220px, 1.4fr) minmax(150px, 0.7fr) minmax(260px, 1fr);
+  grid-template-columns: 38px 34px minmax(280px, 2fr) minmax(130px, 0.65fr) minmax(120px, 0.45fr);
   align-items: center;
   gap: 8px;
   padding: 0 12px;
@@ -623,13 +623,42 @@ select:disabled {
 .channelRow {
   min-height: 42px;
   display: grid;
-  grid-template-columns: 38px 34px minmax(220px, 1.4fr) minmax(150px, 0.7fr) minmax(260px, 1fr);
+  grid-template-columns: 38px 34px minmax(280px, 2fr) minmax(130px, 0.65fr) minmax(120px, 0.45fr);
   align-items: center;
   gap: 8px;
   padding: 5px 12px;
   border-bottom: 1px solid #e5e7eb;
   background: white;
   user-select: none;
+}
+
+.tableHeader.withPlayColumn,
+.channelRow.withPlayColumn {
+  grid-template-columns: 38px 34px minmax(280px, 2.1fr) minmax(120px, 0.55fr) 40px minmax(110px, 0.4fr);
+}
+
+.playButton {
+  width: 30px;
+  height: 30px;
+  border: 1px solid #c7d2fe;
+  border-radius: 999px;
+  background: #eef2ff;
+  color: #3f50b5;
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+  justify-self: center;
+  align-self: center;
+  cursor: pointer;
+}
+
+.playButton:hover {
+  background: #dbe4ff;
+  color: #3730a3;
+}
+
+.playButton:active {
+  transform: scale(0.96);
 }
 
 .channelRow:hover {
@@ -1047,11 +1076,15 @@ select:disabled {
 
   .tableHeader,
   .channelRow {
-    grid-template-columns: 34px 28px minmax(220px, 1fr) 160px;
+    grid-template-columns: 34px 28px minmax(260px, 1fr) 130px minmax(90px, 0.35fr);
   }
 
-  .tableHeader span:last-child,
+  .tableHeader.withPlayColumn,
+  .channelRow.withPlayColumn {
+    grid-template-columns: 34px 28px minmax(260px, 1fr) 118px 38px minmax(90px, 0.35fr);
+  }
+
   .urlCell {
-    display: none;
+    font-size: 11px;
   }
 }

@@ -8,6 +8,7 @@ import {
   FolderInput,
   Image as ImageIcon,
   MoreVertical,
+  Play,
   Plus,
   Trash2,
   Type,
@@ -214,7 +215,6 @@ const SWEDISH_EPG_CODES: BuiltInEpgCode[] = [
   { name: "Viasat Sport Premium HD", code: "ViasatSportPremium.se" },
   { name: "Vision Sverige", code: "VisionSverige.se" },
 ];
-
 function ChannelLogo({
   logo,
   name,
@@ -875,7 +875,6 @@ function exportM3UWithName(channels: Channel[], downloadName: string) {
 
   URL.revokeObjectURL(url);
 }
-
 function createDragPreview(text: string) {
   const preview = document.createElement("div");
   preview.className = "dragPreview";
@@ -1312,6 +1311,8 @@ export default function App() {
   const currentDropTargetRef = useRef<DropTarget | null>(null);
   const importGroupInputRef = useRef<HTMLInputElement | null>(null);
 
+  const isElectron = Boolean(window.electronAPI?.openInVlc);
+
   const brokenLogoSet = useMemo(() => {
     return new Set(brokenLogoIds);
   }, [brokenLogoIds]);
@@ -1592,8 +1593,7 @@ export default function App() {
     closeFloatingMenus();
     resetDragState();
   }
-
-  function undoLastAction() {
+    function undoLastAction() {
     if (undoStack.length === 0) {
       return;
     }
@@ -1692,6 +1692,25 @@ export default function App() {
 
       return current.filter((id) => id !== channelId);
     });
+  }
+
+  async function openUrlInVlc(url: string) {
+    if (!url.trim()) {
+      return;
+    }
+
+    if (window.electronAPI?.openInVlc) {
+      const result = await window.electronAPI.openInVlc(url);
+
+      if (!result.ok) {
+        await navigator.clipboard.writeText(url);
+        window.alert(result.message);
+      }
+
+      return;
+    }
+
+    await navigator.clipboard.writeText(url);
   }
 
   function selectChannelWithEvent(
@@ -1926,7 +1945,8 @@ export default function App() {
 
     reader.readAsText(file);
   }
-    function chooseEpgFile(file: File) {
+
+  function chooseEpgFile(file: File) {
     setPendingEpgFile(file);
     setPendingEpgTargetGroup(selectedGroup || "All Channels");
     setEpgTargetModalOpen(true);
@@ -1991,8 +2011,7 @@ export default function App() {
     setPendingEpgTargetGroup("All Channels");
     setEpgTargetModalOpen(false);
   }
-
-  function toggleAllGroups() {
+    function toggleAllGroups() {
     setLastActivePanel("groups");
 
     if (allGroupsSelected) {
@@ -2183,7 +2202,9 @@ export default function App() {
     }
 
     const groupSet = new Set(cleanGroups);
-    const exportChannels = channels.filter((channel) => groupSet.has(channel.group));
+    const exportChannels = channels.filter((channel) =>
+      groupSet.has(channel.group)
+    );
 
     if (exportChannels.length === 0) {
       window.alert("No channels found in selected group(s).");
@@ -2639,8 +2660,7 @@ export default function App() {
     setLastActivePanel("channels");
     closeFloatingMenus();
   }
-
-  function openChannelEditor() {
+    function openChannelEditor() {
     if (selectedChannelIds.length === 0) {
       return;
     }
@@ -2678,18 +2698,7 @@ export default function App() {
       return;
     }
 
-    if (window.electronAPI?.openInVlc) {
-      const result = await window.electronAPI.openInVlc(channelEditForm.url);
-
-      if (!result.ok) {
-        await navigator.clipboard.writeText(channelEditForm.url);
-        window.alert(result.message);
-      }
-
-      return;
-    }
-
-    await navigator.clipboard.writeText(channelEditForm.url);
+    await openUrlInVlc(channelEditForm.url);
   }
 
   function saveChannelEdit() {
@@ -2807,9 +2816,7 @@ export default function App() {
           ...channel,
           tvgId: epgChannel.id || channel.tvgId,
           tvgName: bestName || channel.tvgName,
-          tvgLogo: shouldUseEpgLogo
-            ? epgChannel.logo
-            : channel.tvgLogo,
+          tvgLogo: shouldUseEpgLogo ? epgChannel.logo : channel.tvgLogo,
         };
 
         return {
@@ -2998,7 +3005,9 @@ export default function App() {
       x: event.clientX,
       y: event.clientY,
     });
-  }  function renderChannelMenu(
+  }
+
+  function renderChannelMenu(
     style?: React.CSSProperties,
     showEpgTools = true
   ) {
@@ -3172,9 +3181,7 @@ export default function App() {
         >
           <span className="menuIcon">⇩</span>
           <span>
-            {groupActionTargets.length > 1
-              ? "Export groups"
-              : "Export group"}
+            {groupActionTargets.length > 1 ? "Export groups" : "Export group"}
           </span>
         </button>
 
@@ -3465,7 +3472,9 @@ export default function App() {
 
               <select
                 value={logoFilter}
-                onChange={(event) => setLogoFilter(event.target.value as LogoFilter)}
+                onChange={(event) =>
+                  setLogoFilter(event.target.value as LogoFilter)
+                }
                 title="Logo filter"
                 style={{
                   minWidth: 145,
@@ -3601,7 +3610,9 @@ export default function App() {
 
                   const className = [
                     "groupRow",
-                    selectedGroup === group && !showSelectedGroupsView ? "active" : "",
+                    selectedGroup === group && !showSelectedGroupsView
+                      ? "active"
+                      : "",
                     selectedGroupSet.has(group) ? "groupSelected" : "",
                     dragOverGroup === group ? "dragOver" : "",
                     draggedGroupNames.includes(group) || draggedGroup === group
@@ -3663,7 +3674,9 @@ export default function App() {
                         setShowSelectedGroupsView(false);
                         setLastSelectedGroupName(group);
                       }}
-                      onContextMenu={(event) => openGroupContextMenu(event, group)}
+                      onContextMenu={(event) =>
+                        openGroupContextMenu(event, group)
+                      }
                       onDragOver={(event) => {
                         event.preventDefault();
 
@@ -3930,11 +3943,14 @@ export default function App() {
                 </button>
               </div>
 
-              <div className="tableHeader">
+              <div
+                className={isElectron ? "tableHeader withPlayColumn" : "tableHeader"}
+              >
                 <span></span>
                 <span></span>
                 <span>Name</span>
                 <span>Group</span>
+                {isElectron && <span></span>}
                 <span>URL</span>
               </div>
 
@@ -3967,6 +3983,7 @@ export default function App() {
                       draggable
                       className={[
                         "channelRow",
+                        isElectron ? "withPlayColumn" : "",
                         isSelected ? "selected" : "",
                         isDragging ? "isDragging" : "",
                       ]
@@ -4011,7 +4028,9 @@ export default function App() {
                         event.dataTransfer.setData("text/plain", channel.id);
                       }}
                       onDragEnd={resetDragState}
-                      onContextMenu={(event) => openChannelContextMenu(event, channel)}
+                      onContextMenu={(event) =>
+                        openChannelContextMenu(event, channel)
+                      }
                       onDoubleClick={() => {
                         setLastActivePanel("channels");
                         setSelectedChannelIds([channel.id]);
@@ -4120,6 +4139,24 @@ export default function App() {
                       </div>
 
                       <span className="groupCell">{channel.group}</span>
+
+                      {isElectron && (
+                        <button
+                          type="button"
+                          className="playButton tooltipButton"
+                          data-tooltip="Open in VLC"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            openUrlInVlc(channel.url);
+                          }}
+                          onDoubleClick={(event) => event.stopPropagation()}
+                          onMouseDown={(event) => event.stopPropagation()}
+                          title=""
+                        >
+                          <Play size={15} fill="currentColor" />
+                        </button>
+                      )}
+
                       <span className="urlCell">{channel.url}</span>
                     </div>
                   );
@@ -4333,7 +4370,9 @@ export default function App() {
                       <code>{selectedEpgChannel.name || "Empty"}</code>
 
                       <span>Cleaned name</span>
-                      <code>{cleanNameForEpg(selectedEpgChannel.name) || "Empty"}</code>
+                      <code>
+                        {cleanNameForEpg(selectedEpgChannel.name) || "Empty"}
+                      </code>
 
                       <span>tvg-id</span>
                       <code>{selectedEpgChannel.tvgId || "Empty"}</code>
@@ -4370,8 +4409,8 @@ export default function App() {
                     >
                       <strong>Current EPG ID is shown above.</strong>
                       <div style={{ marginTop: 6 }}>
-                        Swedish EPG IDs do not require an XML file. They write the
-                        ID directly into <code>tvg-id</code>, for example{" "}
+                        Swedish EPG IDs do not require an XML file. They write
+                        the ID directly into <code>tvg-id</code>, for example{" "}
                         <code>SVT1.se</code> or <code>TV4.se</code>.
                       </div>
                       <div style={{ marginTop: 6 }}>
@@ -4422,7 +4461,9 @@ export default function App() {
                           >
                             <div style={{ minWidth: 0 }}>
                               <strong>
-                                {epgChannel.names[0] || epgChannel.id || "Unnamed EPG"}
+                                {epgChannel.names[0] ||
+                                  epgChannel.id ||
+                                  "Unnamed EPG"}
                               </strong>
                               <div
                                 style={{
